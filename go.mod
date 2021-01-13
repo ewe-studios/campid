@@ -1,4 +1,4 @@
-module github.com/influx6/campid
+module github.com/Ewe-Studios/campid
 
 go 1.14
 
