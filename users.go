@@ -21,7 +21,7 @@ import (
 
 type User struct {
 	Id             string // public id, is user or service provided.
-	Pid            string // private id, provided only by the store.
+	Pid            string // private id, provided only by the Store.
 	FirstName      string
 	LastName       string
 	MiddleName     string
@@ -140,16 +140,16 @@ func CreateUserDocumentMapping() (*mapping.DocumentMapping, error) {
 }
 
 type UserStore struct {
-	codec   UserCodec
-	indexer bleve.Index
-	store   nstorage.ExpirableStore
+	Codec   UserCodec
+	Indexer bleve.Index
+	Store   nstorage.ExpirableStore
 }
 
 func NewUserStore(store nstorage.ExpirableStore, codec UserCodec, indexer bleve.Index) *UserStore {
 	return &UserStore{
-		codec:   codec,
-		store:   store,
-		indexer: indexer,
+		Codec:   codec,
+		Store:   store,
+		Indexer: indexer,
 	}
 }
 
@@ -159,17 +159,17 @@ func (u *UserStore) ById(ctx context.Context, id string) (*User, error) {
 		defer span.Finish()
 	}
 
-	var userPid, getIdErr = u.store.Get(id)
+	var userPid, getIdErr = u.Store.Get(id)
 	if getIdErr != nil {
 		return nil, nerror.WrapOnly(getIdErr)
 	}
 
-	var userData, getErr = u.store.Get(nunsafe.Bytes2String(userPid))
+	var userData, getErr = u.Store.Get(nunsafe.Bytes2String(userPid))
 	if getErr != nil {
 		return nil, nerror.WrapOnly(getErr)
 	}
 
-	var decodedUser, decodeErr = u.codec.Decode(bytes.NewReader(userData))
+	var decodedUser, decodeErr = u.Codec.Decode(bytes.NewReader(userData))
 	if decodeErr != nil {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
@@ -183,12 +183,12 @@ func (u *UserStore) ByPid(ctx context.Context, pid string) (*User, error) {
 		defer span.Finish()
 	}
 
-	var userData, getErr = u.store.Get(pid)
+	var userData, getErr = u.Store.Get(pid)
 	if getErr != nil {
 		return nil, nerror.WrapOnly(getErr)
 	}
 
-	var decodedUser, decodeErr = u.codec.Decode(bytes.NewReader(userData))
+	var decodedUser, decodeErr = u.Codec.Decode(bytes.NewReader(userData))
 	if decodeErr != nil {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
@@ -204,7 +204,7 @@ func (u *UserStore) ByEmail(ctx context.Context, email string) (*User, error) {
 
 	var searchQuery = query.NewMatchQuery("Email:" + email)
 	var req = bleve.NewSearchRequest(searchQuery)
-	var searchResult, searchErr = u.indexer.Search(req)
+	var searchResult, searchErr = u.Indexer.Search(req)
 	if searchErr != nil {
 		return nil, nerror.Wrap(searchErr, "searching for email").Add("email", email)
 	}
@@ -214,12 +214,12 @@ func (u *UserStore) ByEmail(ctx context.Context, email string) (*User, error) {
 	}
 
 	var firstMatch = searchResult.Hits[0]
-	var userData, getErr = u.store.Get(firstMatch.ID)
+	var userData, getErr = u.Store.Get(firstMatch.ID)
 	if getErr != nil {
 		return nil, nerror.WrapOnly(getErr)
 	}
 
-	var decodedUser, decodeErr = u.codec.Decode(bytes.NewReader(userData))
+	var decodedUser, decodeErr = u.Codec.Decode(bytes.NewReader(userData))
 	if decodeErr != nil {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
@@ -235,7 +235,7 @@ func (u *UserStore) ByPhone(ctx context.Context, phone string) (*User, error) {
 
 	var searchQuery = query.NewMatchQuery("Phone:" + phone)
 	var req = bleve.NewSearchRequest(searchQuery)
-	var searchResult, searchErr = u.indexer.Search(req)
+	var searchResult, searchErr = u.Indexer.Search(req)
 	if searchErr != nil {
 		return nil, nerror.Wrap(searchErr, "searching for phone number").Add("phone", phone)
 	}
@@ -245,12 +245,12 @@ func (u *UserStore) ByPhone(ctx context.Context, phone string) (*User, error) {
 	}
 
 	var firstMatch = searchResult.Hits[0]
-	var userData, getErr = u.store.Get(firstMatch.ID)
+	var userData, getErr = u.Store.Get(firstMatch.ID)
 	if getErr != nil {
 		return nil, nerror.WrapOnly(getErr)
 	}
 
-	var decodedUser, decodeErr = u.codec.Decode(bytes.NewReader(userData))
+	var decodedUser, decodeErr = u.Codec.Decode(bytes.NewReader(userData))
 	if decodeErr != nil {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
@@ -264,18 +264,18 @@ func (u *UserStore) RemoveById(ctx context.Context, id string) (*User, error) {
 		defer span.Finish()
 	}
 
-	var removedUserPid, removeErr = u.store.Remove(id)
+	var removedUserPid, removeErr = u.Store.Remove(id)
 	if removeErr != nil {
 		return nil, nerror.WrapOnly(removeErr)
 	}
 
 	var userPid = nunsafe.Bytes2String(removedUserPid)
-	var removedUserData, removeUserErr = u.store.Remove(userPid)
+	var removedUserData, removeUserErr = u.Store.Remove(userPid)
 	if removeUserErr != nil {
 		return nil, nerror.WrapOnly(removeUserErr)
 	}
 
-	var decodedUser, decodeErr = u.codec.Decode(bytes.NewReader(removedUserData))
+	var decodedUser, decodeErr = u.Codec.Decode(bytes.NewReader(removedUserData))
 	if decodeErr != nil {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
@@ -289,17 +289,17 @@ func (u *UserStore) RemoveByPid(ctx context.Context, pid string) (*User, error) 
 		defer span.Finish()
 	}
 
-	var removedUserData, removeErr = u.store.Remove(pid)
+	var removedUserData, removeErr = u.Store.Remove(pid)
 	if removeErr != nil {
 		return nil, nerror.WrapOnly(removeErr)
 	}
 
-	var decodedUser, decodeErr = u.codec.Decode(bytes.NewReader(removedUserData))
+	var decodedUser, decodeErr = u.Codec.Decode(bytes.NewReader(removedUserData))
 	if decodeErr != nil {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
 
-	var _, removeIdErr = u.store.Remove(decodedUser.Id)
+	var _, removeIdErr = u.Store.Remove(decodedUser.Id)
 	if removeIdErr != nil {
 		return nil, nerror.WrapOnly(removeIdErr)
 	}
@@ -313,7 +313,7 @@ func (u *UserStore) Update(ctx context.Context, updated *User) error {
 		defer span.Finish()
 	}
 
-	var currentUserPid, getPidErr = u.store.Get(updated.Id)
+	var currentUserPid, getPidErr = u.Store.Get(updated.Id)
 	if getPidErr != nil {
 		return nerror.WrapOnly(getPidErr)
 	}
@@ -323,16 +323,16 @@ func (u *UserStore) Update(ctx context.Context, updated *User) error {
 	}
 
 	var b strings.Builder
-	var encodedErr = u.codec.Encode(&b, updated)
+	var encodedErr = u.Codec.Encode(&b, updated)
 	if encodedErr != nil {
 		return nerror.WrapOnly(encodedErr)
 	}
 
-	if saveErr := u.store.Save(updated.Pid, nunsafe.String2Bytes(b.String())); saveErr != nil {
+	if saveErr := u.Store.Save(updated.Pid, nunsafe.String2Bytes(b.String())); saveErr != nil {
 		return nerror.WrapOnly(saveErr)
 	}
 
-	if indexErr := u.indexer.Index(updated.Pid, updated); indexErr != nil {
+	if indexErr := u.Indexer.Index(updated.Pid, updated); indexErr != nil {
 		return nerror.WrapOnly(indexErr)
 	}
 
@@ -347,7 +347,7 @@ func (u *UserStore) HasEmail(ctx context.Context, email string) (bool, error) {
 
 	var searchQuery = query.NewMatchQuery("Email:" + email)
 	var req = bleve.NewSearchRequest(searchQuery)
-	var searchResult, searchErr = u.indexer.Search(req)
+	var searchResult, searchErr = u.Indexer.Search(req)
 	if searchErr != nil {
 		return false, nerror.Wrap(searchErr, "searching for email").Add("email", email)
 	}
@@ -366,7 +366,7 @@ func (u *UserStore) HasPhone(ctx context.Context, phone string) (bool, error) {
 
 	var searchQuery = query.NewMatchQuery("Phone:" + phone)
 	var req = bleve.NewSearchRequest(searchQuery)
-	var searchResult, searchErr = u.indexer.Search(req)
+	var searchResult, searchErr = u.Indexer.Search(req)
 	if searchErr != nil {
 		return false, nerror.Wrap(searchErr, "searching for phone number").Add("phone", phone)
 	}
@@ -400,21 +400,21 @@ func (u *UserStore) Add(ctx context.Context, data User) (*User, error) {
 	data.Pid = nxid.New().String()
 
 	var b strings.Builder
-	var encodedErr = u.codec.Encode(&b, &data)
+	var encodedErr = u.Codec.Encode(&b, &data)
 	if encodedErr != nil {
 		return nil, nerror.WrapOnly(encodedErr)
 	}
 
-	if saveErr := u.store.Save(data.Pid, nunsafe.String2Bytes(b.String())); saveErr != nil {
+	if saveErr := u.Store.Save(data.Pid, nunsafe.String2Bytes(b.String())); saveErr != nil {
 		return nil, nerror.WrapOnly(saveErr)
 	}
 
 	// point the public id to the pid.
-	if saveErr := u.store.Save(data.Id, nunsafe.String2Bytes(data.Pid)); saveErr != nil {
+	if saveErr := u.Store.Save(data.Id, nunsafe.String2Bytes(data.Pid)); saveErr != nil {
 		return nil, nerror.WrapOnly(saveErr)
 	}
 
-	if indexErr := u.indexer.Index(data.Pid, data); indexErr != nil {
+	if indexErr := u.Indexer.Index(data.Pid, data); indexErr != nil {
 		return nil, nerror.WrapOnly(indexErr)
 	}
 

@@ -10,7 +10,7 @@ import (
 )
 
 // MsgPackUserCodec implements the UserCodec interface for using
-// the MsgPack codec.
+// the MsgPack Codec.
 type MsgPackUserCodec struct{}
 
 // Encode encodes giving session using the internal MsgPack format.
@@ -32,7 +32,7 @@ func (gb *MsgPackUserCodec) Decode(r io.Reader) (*User, error) {
 }
 
 // JsonUserCodec implements the UserCodec interface for using
-// the Json codec.
+// the Json Codec.
 type JsonUserCodec struct{}
 
 // Encode encodes giving session using the internal Json format.
@@ -54,7 +54,7 @@ func (gb *JsonUserCodec) Decode(r io.Reader) (*User, error) {
 }
 
 // GobUserCodec implements the UserCodec interface for using
-// the gob codec.
+// the gob Codec.
 type GobUserCodec struct{}
 
 // Encode encodes giving session using the internal gob format.

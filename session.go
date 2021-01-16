@@ -134,7 +134,7 @@ func NewSessionStore(codec SessionCodec, store nstorage.ExpirableStore) *Session
 	}
 }
 
-// Save adds giving session into underline store.
+// Save adds giving session into underline Store.
 //
 // It sets the session to expire within the storage based on
 // the giving session's expiration duration.
@@ -169,7 +169,7 @@ func (s *SessionStore) Save(ctx context.Context, se *Session) error {
 	return nil
 }
 
-// Update attempts to update existing session key within store if
+// Update attempts to update existing session key within Store if
 // still available.
 //
 // Update calculates the ttl by subtracting the Session.Updated value from
@@ -199,7 +199,7 @@ func (s *SessionStore) Update(ctx context.Context, se *Session) error {
 	return nil
 }
 
-// GetAll returns all sessions stored within store.
+// GetAll returns all sessions stored within Store.
 func (s *SessionStore) GetAll(ctx context.Context) ([]Session, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
@@ -254,7 +254,7 @@ func (s *SessionStore) GetAllForUser(ctx context.Context, userId string) ([]Sess
 	return sessions, nil
 }
 
-// GetByUser retrieves giving session from store based on the provided
+// GetByUser retrieves giving session from Store based on the provided
 // session user value.
 func (s *SessionStore) GetById(ctx context.Context, sid string, userId string) (*Session, error) {
 	var span openTracing.Span
@@ -277,7 +277,7 @@ func (s *SessionStore) GetById(ctx context.Context, sid string, userId string) (
 	return session, nil
 }
 
-// Remove removes underline session if still present from underline store.
+// Remove removes underline session if still present from underline Store.
 func (s *SessionStore) Remove(ctx context.Context, sid string, userId string) (*Session, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
