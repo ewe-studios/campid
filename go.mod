@@ -9,8 +9,10 @@ require (
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
 	github.com/glycerine/go-unsnap-stream v0.0.0-20190901134440-81cf024a9e0a // indirect
 	github.com/golang/snappy v0.0.2 // indirect
-	github.com/influx6/npkg v0.6.7
+	github.com/google/go-cmp v0.5.4
+	github.com/influx6/npkg v0.7.0
 	github.com/influx6/sabuhp v0.3.0
+	github.com/oklog/ulid/v2 v2.0.2
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/stretchr/testify v1.6.1
 	github.com/tinylib/msgp v1.1.5 // indirect
