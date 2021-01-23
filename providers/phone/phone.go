@@ -5,11 +5,11 @@ import (
 
 	"github.com/influx6/sabuhp"
 )
-	
-type EmailAuth struct {
+
+type PhoneAuth struct {
 }
 
-func (em *EmailAuth) Register(
+func (em *PhoneAuth) Register(
 	ctx context.Context,
 	msg *sabuhp.Message,
 	tr sabuhp.Transport,
@@ -17,7 +17,7 @@ func (em *EmailAuth) Register(
 	return nil
 }
 
-func (em *EmailAuth) Refresh(
+func (em *PhoneAuth) Refresh(
 	ctx context.Context,
 	msg *sabuhp.Message,
 	tr sabuhp.Transport,
@@ -25,7 +25,7 @@ func (em *EmailAuth) Refresh(
 	return nil
 }
 
-func (em *EmailAuth) Callback(
+func (em *PhoneAuth) Callback(
 	ctx context.Context,
 	msg *sabuhp.Message,
 	tr sabuhp.Transport,
@@ -33,7 +33,7 @@ func (em *EmailAuth) Callback(
 	return nil
 }
 
-func (em *EmailAuth) Logout(
+func (em *PhoneAuth) Logout(
 	ctx context.Context,
 	msg *sabuhp.Message,
 	tr sabuhp.Transport,
@@ -41,7 +41,7 @@ func (em *EmailAuth) Logout(
 	return nil
 }
 
-func (em *EmailAuth) Login(
+func (em *PhoneAuth) Login(
 	ctx context.Context,
 	msg *sabuhp.Message,
 	tr sabuhp.Transport,

@@ -81,15 +81,16 @@ func CreateSessionDocumentMapping() (*mapping.DocumentMapping, error) {
 }
 
 type Session struct {
-	Agent   *Agent
-	IP      net.IP
-	Created time.Time
-	Updated time.Time
-	Expires time.Time
-	Id      string
-	Method  string
-	UserId  string
-	Meta    map[string]string
+	Agent     *Agent
+	IP        net.IP
+	CSrfToken string
+	Created   time.Time
+	Updated   time.Time
+	Expires   time.Time
+	Id        string
+	Method    string
+	UserId    string
+	Meta      map[string]string
 }
 
 // Validate returns an error if giving session was invalid.
