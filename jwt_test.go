@@ -17,6 +17,7 @@ var myUser = "1"
 func TestJwtManufacturer(t *testing.T) {
 	var config JWTConfig
 	config.GetTime = time.Now
+	config.MapCodec = &JsonMapCodec{}
 	config.GetNewClaim = func() (jwt.MapClaims, jwt.SigningMethod, interface{}) {
 		return jwt.MapClaims{
 			"keym": "V1",
@@ -40,10 +41,12 @@ func TestJwtManufacturer(t *testing.T) {
 
 	var manager = NewJWTManufacturer(config)
 
+	var ctx = context.Background()
+
 	t.Run("Create", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(context.Background(), myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.Id)
 		require.NotEmpty(t, claim.AccessToken)
@@ -57,12 +60,54 @@ func TestJwtManufacturer(t *testing.T) {
 		require.Equal(t, myUser, claim.UserId)
 	})
 
-	var ctx = context.Background()
+	t.Run("CreateWithData", func(t *testing.T) {
+		store.Clear()
+
+		var claim, err = manager.Create(ctx, myUser, "", map[string]string{"day": "2"})
+		require.NoError(t, err)
+		require.NotEmpty(t, claim.Id)
+		require.NotEmpty(t, claim.AccessToken)
+		require.NotEmpty(t, claim.RefreshToken)
+		require.NotEmpty(t, claim.RefreshId)
+		require.NotEmpty(t, claim.AccessId)
+		require.NotEmpty(t, claim.RandomId)
+		require.Len(t, claim.RandomId, 30)
+		require.NotEmpty(t, claim.UserId)
+		require.True(t, claim.IsUsable)
+		require.Equal(t, myUser, claim.UserId)
+		require.NotNil(t, claim.Data)
+		require.Equal(t, "2", claim.Data["day"])
+	})
+
+	t.Run("CreateWithDataAndVerifyAccess", func(t *testing.T) {
+		store.Clear()
+
+		var claim, err = manager.Create(ctx, myUser, "", map[string]string{"day": "2"})
+		require.NoError(t, err)
+		require.NotEmpty(t, claim.Id)
+		require.NotEmpty(t, claim.AccessToken)
+		require.NotEmpty(t, claim.RefreshToken)
+		require.NotEmpty(t, claim.RefreshId)
+		require.NotEmpty(t, claim.AccessId)
+		require.NotEmpty(t, claim.RandomId)
+		require.Len(t, claim.RandomId, 30)
+		require.NotEmpty(t, claim.UserId)
+		require.True(t, claim.IsUsable)
+		require.Equal(t, myUser, claim.UserId)
+		require.NotNil(t, claim.Data)
+		require.Equal(t, "2", claim.Data["day"])
+
+		var verifiedClaim, _, verifiedErr = manager.VerifyAccess(ctx, claim.AccessToken, "")
+		require.NoError(t, verifiedErr)
+		require.Equal(t, claim.RefreshId, verifiedClaim.RefreshId)
+		require.NotNil(t, verifiedClaim.Data)
+		require.Equal(t, "2", verifiedClaim.Data["day"])
+	})
 
 	t.Run("VerifyAccess", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.Id)
 		require.NotEmpty(t, claim.AccessToken)
@@ -76,11 +121,10 @@ func TestJwtManufacturer(t *testing.T) {
 		require.Equal(t, claim.RefreshId, verifiedClaim.RefreshId)
 	})
 
-
 	t.Run("VerifyAccessWithWrongCsrf", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "1")
+		var claim, err = manager.Create(ctx, myUser, "1", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.Id)
 		require.NotEmpty(t, claim.AccessToken)
@@ -96,7 +140,7 @@ func TestJwtManufacturer(t *testing.T) {
 	t.Run("Refresh", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.Id)
 		require.NotEmpty(t, claim.AccessToken)
@@ -138,7 +182,7 @@ func TestJwtManufacturer(t *testing.T) {
 	t.Run("GetRefreshTokenByRefreshId", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.Id)
 		require.NotEmpty(t, claim.AccessToken)
@@ -155,7 +199,7 @@ func TestJwtManufacturer(t *testing.T) {
 	t.Run("GetUserIdByAccessId", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.Id)
 		require.NotEmpty(t, claim.AccessToken)
@@ -172,7 +216,7 @@ func TestJwtManufacturer(t *testing.T) {
 	t.Run("RemoveRefreshId", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.AccessToken)
 		require.NotEmpty(t, claim.RefreshToken)
@@ -190,7 +234,7 @@ func TestJwtManufacturer(t *testing.T) {
 	t.Run("RemoveAccessId", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.AccessToken)
 		require.NotEmpty(t, claim.RefreshToken)
@@ -208,7 +252,7 @@ func TestJwtManufacturer(t *testing.T) {
 	t.Run("RemoveJwtId", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.Id)
 		require.NotEmpty(t, claim.AccessToken)
@@ -224,7 +268,7 @@ func TestJwtManufacturer(t *testing.T) {
 	t.Run("GetJwtAcccessAndRequestId", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.Id)
 		require.NotEmpty(t, claim.AccessToken)
@@ -242,7 +286,7 @@ func TestJwtManufacturer(t *testing.T) {
 	t.Run("GetAllAccessIds", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.Id)
 		require.NotEmpty(t, claim.AccessToken)
@@ -260,7 +304,7 @@ func TestJwtManufacturer(t *testing.T) {
 	t.Run("GetAllRefreshIds", func(t *testing.T) {
 		store.Clear()
 
-		var claim, err = manager.Create(ctx, myUser, "")
+		var claim, err = manager.Create(ctx, myUser, "", nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, claim.Id)
 		require.NotEmpty(t, claim.AccessToken)

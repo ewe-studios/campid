@@ -5,8 +5,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
-	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -19,12 +19,19 @@ import (
 	openTracing "github.com/opentracing/opentracing-go"
 )
 
+var mapPool = &sync.Pool{
+	New: func() interface{} {
+		return bytes.NewBuffer(make([]byte, 512))
+	},
+}
+
 const (
 	dot               = "."
 	jwtIdKey          = "jid"
 	refreshIdKey      = "rid"
 	accessIdKey       = "acid"
 	csrfHeader        = "_csrf"
+	dataKey           = "_data"
 	parentAccessIdKey = "pa_acid"
 )
 
@@ -42,11 +49,6 @@ type GetSigningMethodAndKeyForClaim func() (modClaims jwt.MapClaims, method jwt.
 // GetSigningKeyForToken returns the key for giving token if it's a validly signed token.
 type GetSigningKeyForToken func(t *jwt.Token) (key interface{}, err error)
 
-type JWTCodec interface {
-	Decode(r io.Reader) (Claim, error)
-	Encode(w io.Writer, c Claim) error
-}
-
 type JWTConfig struct {
 	Issuer                 string
 	Authorizer             string
@@ -55,6 +57,7 @@ type JWTConfig struct {
 	AccessTokenExpiration  time.Duration
 	RefreshTokenExpiration time.Duration
 	GetTime                TimeFunc
+	MapCodec               MapCodec
 	Store                  nstorage.ExpirableStore
 }
 
@@ -130,13 +133,14 @@ type Claim struct {
 	RefreshToken   string
 	RefreshExpires int64
 	AccessExpires  int64
+	Data           map[string]string
 }
 
-func (jm JWTManufacturer) Create(ctx context.Context, userId string, csrfToken string) (Claim, error) {
-	return jm.CreateWithId(ctx, nxid.New(), userId, csrfToken, nxid.NilID())
+func (jm JWTManufacturer) Create(ctx context.Context, userId string, csrfToken string, data map[string]string) (Claim, error) {
+	return jm.CreateWithId(ctx, nxid.New(), userId, csrfToken, nxid.NilID(), data)
 }
 
-func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userId string, csrfToken string, parentAccessId nxid.ID) (Claim, error) {
+func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userId string, csrfToken string, parentAccessId nxid.ID, data map[string]string) (Claim, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -145,6 +149,7 @@ func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userI
 	_ = ctx
 
 	var c Claim
+	c.Data = data
 	c.DataClaim.Id = jwtId
 	c.DataClaim.UserId = userId
 	c.DataClaim.RefreshId = nxid.New()
@@ -169,6 +174,23 @@ func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userI
 
 	// create claim for access token.
 	var reMappedAccessClaim, signingMethodForAccess, signingKeyForAccess = jm.GetNewClaim()
+
+	var encodedMapData = mapPool.Get().(*bytes.Buffer)
+	defer mapPool.Put(encodedMapData)
+
+	encodedMapData.Reset()
+
+	var encodedData string
+	if data != nil {
+		var encodedMapErr = jm.MapCodec.Encode(encodedMapData, data)
+		if encodedMapErr != nil {
+			return c, nerror.WrapOnly(encodedMapErr)
+		}
+
+		encodedData = base64.RawStdEncoding.EncodeToString(encodedMapData.Bytes())
+	}
+
+	reMappedAccessClaim[dataKey] = encodedData
 	reMappedAccessClaim[accessIdKey] = c.AccessId.String()
 	reMappedAccessClaim[refreshIdKey] = c.RefreshId.String()
 	reMappedAccessClaim[parentAccessIdKey] = parentAccessId
@@ -207,13 +229,23 @@ func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userI
 		return c, nerror.WrapOnly(saveErr)
 	}
 
+	var formattedJwtDataId = jm.formatJwtData(c.Id.String())
+	if saveErr := jm.Store.SaveTTL(
+		formattedJwtDataId,
+		nunsafe.String2Bytes(encodedData),
+		jm.RefreshTokenExpiration,
+	); saveErr != nil {
+		_ = jm.Store.RemoveKeys(formattedAccessId, formattedRefreshId)
+		return c, nerror.WrapOnly(saveErr)
+	}
+
 	var formattedJwtId = jm.formatJwtId(c.Id.String())
 	if saveErr := jm.Store.SaveTTL(
 		formattedJwtId,
 		nunsafe.String2Bytes(jm.formatAccessIdAndRefreshId(c.AccessId.String(), c.RefreshId.String())),
 		jm.RefreshTokenExpiration,
 	); saveErr != nil {
-		_ = jm.Store.RemoveKeys(formattedAccessId, formattedRefreshId)
+		_ = jm.Store.RemoveKeys(formattedAccessId, formattedRefreshId, formattedJwtDataId)
 		return c, nerror.WrapOnly(saveErr)
 	}
 
@@ -256,6 +288,21 @@ func (jm JWTManufacturer) VerifyAccess(ctx context.Context, accessToken string, 
 				c.ParentAccessId = nxid.NilID()
 			}
 		}
+	}
+
+	if encodedDataMapString, hasEncodedDataMap := mappedClaims[dataKey].(string); hasEncodedDataMap && len(encodedDataMapString) != 0 {
+		var encodedB64String, encodedB64Err = base64.RawStdEncoding.DecodeString(encodedDataMapString)
+		if encodedB64Err != nil {
+			return c, nil, nerror.WrapOnly(encodedB64Err)
+		}
+
+		var mapDataReader = bytes.NewBuffer(encodedB64String)
+		var decodedMap, decodedMapErr = jm.MapCodec.Decode(mapDataReader)
+		if decodedMapErr != nil {
+			return c, nil, nerror.WrapOnly(decodedMapErr)
+		}
+
+		c.Data = decodedMap
 	}
 
 	var accessId, hasAccessId = mappedClaims[accessIdKey].(string)
@@ -391,6 +438,29 @@ func (jm JWTManufacturer) Refresh(ctx context.Context, refreshToken string, csrf
 
 	c.DataClaim = dc
 
+	var formattedJwtDataId = jm.formatJwtData(c.Id.String())
+	var jwtData, getJwtDataErr = jm.Store.Get(formattedJwtDataId)
+	if getJwtDataErr != nil {
+		return c, nerror.WrapOnly(getJwtDataErr)
+	}
+
+	var jwtDataMap map[string]string
+	if len(jwtData) != 0 {
+		var jwtDataString = nunsafe.Bytes2String(jwtData)
+		var encodedB64String, encodedB64Err = base64.RawStdEncoding.DecodeString(jwtDataString)
+		if encodedB64Err != nil {
+			return c, nerror.WrapOnly(encodedB64Err)
+		}
+
+		var mapDataReader = bytes.NewBuffer(encodedB64String)
+		var decodedMap, decodedMapErr = jm.MapCodec.Decode(mapDataReader)
+		if decodedMapErr != nil {
+			return c, nerror.WrapOnly(decodedMapErr)
+		}
+
+		jwtDataMap = decodedMap
+	}
+
 	// if we are able to get refreshkey then it's not expired.
 	var formattedRefreshId = jm.formatRefreshId(c.RefreshId.String())
 	var refreshValueBytes, getRefreshTokenErr = jm.Store.Get(formattedRefreshId)
@@ -406,7 +476,7 @@ func (jm JWTManufacturer) Refresh(ctx context.Context, refreshToken string, csrf
 
 	// Create new jwt claim
 	var newClaimErr error
-	c, newClaimErr = jm.CreateWithId(ctx, c.Id, c.UserId, csrfToken, c.AccessId)
+	c, newClaimErr = jm.CreateWithId(ctx, c.Id, c.UserId, csrfToken, c.AccessId, jwtDataMap)
 	if newClaimErr != nil {
 		return c, nerror.WrapOnly(newClaimErr)
 	}
@@ -547,6 +617,40 @@ func (jm JWTManufacturer) GetRefreshTokenById(ctx context.Context, refreshId str
 	return userId, nil
 }
 
+func (jm JWTManufacturer) GetJwtDataById(ctx context.Context, id string) (map[string]string, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	_ = ctx
+	var jwtIdKey = jm.formatJwtData(id)
+
+	// if we are able to get refreshkey then it's not expired.
+	var jwtDataString, getJwtDataErr = jm.Store.Get(jwtIdKey)
+	if getJwtDataErr != nil {
+		return nil, nerror.WrapOnly(getJwtDataErr)
+	}
+
+	var jwtDataMap map[string]string
+	if len(jwtDataString) != 0 {
+		var jwtDataString = nunsafe.Bytes2String(jwtDataString)
+		var encodedB64String, encodedB64Err = base64.RawStdEncoding.DecodeString(jwtDataString)
+		if encodedB64Err != nil {
+			return nil, nerror.WrapOnly(encodedB64Err)
+		}
+
+		var mapDataReader = bytes.NewBuffer(encodedB64String)
+		var decodedMap, decodedMapErr = jm.MapCodec.Decode(mapDataReader)
+		if decodedMapErr != nil {
+			return nil, nerror.WrapOnly(decodedMapErr)
+		}
+
+		jwtDataMap = decodedMap
+	}
+	return jwtDataMap, nil
+}
+
 func (jm JWTManufacturer) GetAccessIdAndRefreshIdByJwtId(ctx context.Context, jwtId string) (accessId string, refreshId string, err error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
@@ -645,6 +749,12 @@ func (jm JWTManufacturer) GetAllJwtIds(ctx context.Context) ([]string, error) {
 		decodedList[index] = strings.TrimPrefix(id, jwtIdPrefix)
 	}
 	return decodedList, err
+}
+
+var jwtDataPrefix = "jwtData."
+
+func (jm JWTManufacturer) formatJwtData(id string) string {
+	return jwtDataPrefix + id
 }
 
 var jwtIdPrefix = "jwtId."
