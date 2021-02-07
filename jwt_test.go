@@ -181,6 +181,23 @@ func TestJwtManufacturer(t *testing.T) {
 		require.Equal(t, claim.RefreshToken, refreshToken)
 	})
 
+	t.Run("GetAll", func(t *testing.T) {
+		store.Clear()
+
+		var claim, err = manager.Create(ctx, mySessionId, myUser, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, claim.Id)
+		require.NotEmpty(t, claim.AccessToken)
+		require.NotEmpty(t, claim.RefreshToken)
+		require.NotEmpty(t, claim.RefreshId)
+		require.NotEmpty(t, claim.AccessId)
+		require.Equal(t, myUser, claim.UserId)
+
+		var idList, getErr = manager.GetAllJwtIds(ctx)
+		require.NoError(t, getErr)
+		require.Len(t, idList, 1)
+	})
+
 	t.Run("GetUserIdByAccessId", func(t *testing.T) {
 		store.Clear()
 
