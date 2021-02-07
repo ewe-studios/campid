@@ -27,6 +27,8 @@ var sampleUser = User{
 }
 
 func TestUserStore(t *testing.T) {
+	defer os.RemoveAll(t.Name())
+	os.RemoveAll(t.Name())
 
 	var indexMapping, indexErr = CreateUserIndexMapping()
 	require.NoError(t, indexErr)

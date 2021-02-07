@@ -13,6 +13,9 @@ import (
 )
 
 func TestDeviceStore(t *testing.T) {
+	defer os.RemoveAll(t.Name())
+	os.RemoveAll(t.Name())
+
 	var indexMapping, indexMappingErr = CreateIndexMappingForAll()
 	require.NoError(t, indexMappingErr)
 
