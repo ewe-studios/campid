@@ -154,6 +154,42 @@ func TestSessionManager(t *testing.T) {
 	require.NotNil(t, sz7)
 	require.Len(t, claimList, 1)
 
+	var trustedDevice, trustDeviceErr = sessionManager.TrustDevice(ctx, sz.Id, dr.Id)
+	require.NoError(t, trustDeviceErr)
+	require.NotNil(t, trustedDevice)
+	require.True(t, trustedDevice.IsTrusted)
+
+	var deviceFromStore, getDvErr = deviceStore.GetDevice(ctx, dr.Id)
+	require.NoError(t, getDvErr)
+	require.NotNil(t, deviceFromStore)
+	require.True(t, deviceFromStore.IsTrusted)
+
+	var distrustedDevice, distrustDeviceErr = sessionManager.DistrustDevice(ctx, sz.Id, dr.Id)
+	require.NoError(t, distrustDeviceErr)
+	require.NotNil(t, distrustedDevice)
+	require.False(t, distrustedDevice.IsTrusted)
+
+	deviceFromStore, getDvErr = deviceStore.GetDevice(ctx, dr.Id)
+	require.NoError(t, getDvErr)
+	require.NotNil(t, deviceFromStore)
+	require.False(t, deviceFromStore.IsTrusted)
+
+	var _, doOpErr = sessionManager.EnableDevice(ctx, sz.Id, dr.Id)
+	require.NoError(t, doOpErr)
+
+	deviceFromStore, getDvErr = deviceStore.GetDevice(ctx, dr.Id)
+	require.NoError(t, getDvErr)
+	require.NotNil(t, deviceFromStore)
+	require.True(t, deviceFromStore.IsEnabled)
+
+	_, doOpErr = sessionManager.DisableDevice(ctx, sz.Id, dr.Id)
+	require.NoError(t, doOpErr)
+
+	deviceFromStore, getDvErr = deviceStore.GetDevice(ctx, dr.Id)
+	require.NoError(t, getDvErr)
+	require.NotNil(t, deviceFromStore)
+	require.False(t, deviceFromStore.IsEnabled)
+
 	var sameSession, newClaim, sameDevice, createNewErr = sessionManager.Create(ctx, myUserId, myMethod, myDevice, myjwtData, mySessionData)
 	require.NoError(t, createNewErr)
 	require.NotNil(t, sameSession)

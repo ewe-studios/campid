@@ -306,7 +306,7 @@ func (s *SessionManager) Create(
 			return nil, nil, nil, nerror.WrapOnly(generatedCsrfErr)
 		}
 
-		se.CSrfToken = hex.EncodeToString(generatedCsrf)
+		se.CsrfMessage = hex.EncodeToString(generatedCsrf)
 		if saveSessionErr := s.SessionStore.Save(ctx, &se); saveSessionErr != nil {
 			return nil, nil, nil, nerror.WrapOnly(saveSessionErr)
 		}

@@ -16,7 +16,7 @@ func TestSessionStore(t *testing.T) {
 
 	var sz Session
 	sz.UserId = "1"
-	sz.CSrfToken = "m"
+	sz.CsrfMessage = "m"
 	sz.Updated = time.Now()
 	sz.Created = time.Now()
 	sz.Method = "web-client"
@@ -24,7 +24,7 @@ func TestSessionStore(t *testing.T) {
 
 	var sz2 Session
 	sz2.UserId = "1"
-	sz2.CSrfToken = "m"
+	sz2.CsrfMessage = "m"
 	sz2.Updated = time.Now()
 	sz2.Created = time.Now()
 	sz2.Method = "mobile-client"

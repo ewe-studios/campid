@@ -53,7 +53,7 @@ func CreateSessionDocumentMapping() (*mapping.DocumentMapping, error) {
 }
 
 type Session struct {
-	CSrfToken string
+	CsrfMessage string
 	Created   time.Time
 	Updated   time.Time
 	Id        string
@@ -70,7 +70,7 @@ func (s *Session) Validate() error {
 	if s.Updated.IsZero() {
 		return nerror.New("session.Updated has no updated time stamp")
 	}
-	if len(s.CSrfToken) == 0 {
+	if len(s.CsrfMessage) == 0 {
 		return nerror.New("session.CSrfToken must have a valid value")
 	}
 	if len(s.Id) == 0 {
