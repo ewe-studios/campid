@@ -3,9 +3,8 @@ package campid
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
-	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,7 +15,6 @@ import (
 
 	"github.com/influx6/npkg/nstorage"
 	openTracing "github.com/opentracing/opentracing-go"
-	"xojoc.pw/useragent"
 
 	"github.com/influx6/npkg/nerror"
 	"github.com/influx6/npkg/ntrace"
@@ -30,22 +28,6 @@ var (
 	}
 )
 
-type Agent struct {
-	*useragent.UserAgent
-	Browser string
-}
-
-func ParseAgent(agentString string) (*Agent, error) {
-	var agentInfo = useragent.Parse(agentString)
-	if agentInfo == nil {
-		return nil, nerror.New("failed to parse agent")
-	}
-	return &Agent{
-		Browser:   agentInfo.Name,
-		UserAgent: agentInfo,
-	}, nil
-}
-
 func CreateSessionDocumentMapping() (*mapping.DocumentMapping, error) {
 	var sessionMapping = bleve.NewDocumentMapping()
 
@@ -55,38 +37,25 @@ func CreateSessionDocumentMapping() (*mapping.DocumentMapping, error) {
 	var textField = bleve.NewTextFieldMapping()
 	textField.Analyzer = keyword.Name
 
-	var booleanField = bleve.NewBooleanFieldMapping()
-	booleanField.Analyzer = keyword.Name
-
 	var dateTimeField = bleve.NewDateTimeFieldMapping()
-	booleanField.Analyzer = keyword.Name
-
-	var agentMapping = bleve.NewDocumentMapping()
-	agentMapping.AddFieldMappingsAt("Browser", textField)
-	agentMapping.AddFieldMappingsAt("OS", textField)
-	agentMapping.AddFieldMappingsAt("Name", textField)
-
-	sessionMapping.AddSubDocumentMapping("Agent", agentMapping)
+	dateTimeField.Analyzer = keyword.Name
 
 	sessionMapping.AddFieldMappingsAt("Created", dateTimeField)
 	sessionMapping.AddFieldMappingsAt("Updated", dateTimeField)
-	sessionMapping.AddFieldMappingsAt("Expires", dateTimeField)
 
 	sessionMapping.AddFieldMappingsAt("IP", textField)
 	sessionMapping.AddFieldMappingsAt("Id", textField)
 	sessionMapping.AddFieldMappingsAt("Method", textField)
+	sessionMapping.AddFieldMappingsAt("CsrfToken", textField)
 	sessionMapping.AddFieldMappingsAt("UserId", englishTextField)
 
 	return sessionMapping, nil
 }
 
 type Session struct {
-	Agent     *Agent
-	IP        net.IP
 	CSrfToken string
 	Created   time.Time
 	Updated   time.Time
-	Expires   time.Time
 	Id        string
 	Method    string
 	UserId    string
@@ -101,8 +70,8 @@ func (s *Session) Validate() error {
 	if s.Updated.IsZero() {
 		return nerror.New("session.Updated has no updated time stamp")
 	}
-	if s.Expires.IsZero() {
-		return nerror.New("session.Expiring has no expiration time stamp")
+	if len(s.CSrfToken) == 0 {
+		return nerror.New("session.CSrfToken must have a valid value")
 	}
 	if len(s.Id) == 0 {
 		return nerror.New("session.ID must have a valid value")
@@ -162,9 +131,7 @@ func (s *SessionStore) Save(ctx context.Context, se *Session) error {
 
 	var key = buildSessionKey(se.Id, se.UserId)
 
-	// Calculate expiration for giving value.
-	var expiration = se.Expires.Sub(se.Created)
-	if err := s.Store.SaveTTL(key, content.Bytes(), expiration); err != nil {
+	if err := s.Store.Save(key, content.Bytes()); err != nil {
 		return nerror.Wrap(err, "Failed to save encoded session")
 	}
 	return nil
@@ -192,9 +159,8 @@ func (s *SessionStore) Update(ctx context.Context, se *Session) error {
 		return nerror.Wrap(err, "Failed to encode data")
 	}
 
-	// Calculate expiration for giving value.
-	var expiration = se.Expires.Sub(se.Updated)
-	if err := s.Store.UpdateTTL(se.Id, content.Bytes(), expiration); err != nil {
+	var key = buildSessionKey(se.Id, se.UserId)
+	if err := s.Store.Update(key, content.Bytes()); err != nil {
 		return nerror.Wrap(err, "Failed to update encoded session")
 	}
 	return nil
@@ -223,14 +189,14 @@ func (s *SessionStore) GetAll(ctx context.Context) ([]Session, error) {
 	return sessions, nil
 }
 
-// GetAllForUser will return a list of all found sessions data from the underline datastore.
-func (s *SessionStore) GetAllForUser(ctx context.Context, userId string) ([]Session, error) {
+// GetOneForUser will return a list of all found sessions data from the underline datastore.
+func (s *SessionStore) GetOneForUser(ctx context.Context, userId string) (*Session, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
 	}
 	var targetPrefix = buildSessionKey("*", userId)
-	var sessionKeys, getKeysErr = s.Store.EachKeyPrefix(targetPrefix)
+	var sessionKeys, getKeysErr = s.Store.EachKeyMatch(targetPrefix)
 	if getKeysErr != nil {
 		return nil, nerror.WrapOnly(getKeysErr)
 	}
@@ -238,6 +204,39 @@ func (s *SessionStore) GetAllForUser(ctx context.Context, userId string) ([]Sess
 	var sessionDataList, getDataErr = s.Store.GetAnyKeys(sessionKeys...)
 	if getDataErr != nil {
 		return nil, nerror.WrapOnly(getDataErr)
+	}
+
+	if len(sessionDataList) == 0 {
+		return nil, nerror.New("has no sessions")
+	}
+
+	var reader = bytes.NewBuffer(sessionDataList[0])
+	var session, decodeErr = s.Codec.Decode(reader)
+	if decodeErr != nil {
+		return nil, nerror.WrapOnly(decodeErr)
+	}
+	return session, nil
+}
+
+// GetAllForUser will return a list of all found sessions data from the underline datastore.
+func (s *SessionStore) GetAllForUser(ctx context.Context, userId string) ([]Session, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+	var targetPrefix = buildSessionKey("*", userId)
+	var sessionKeys, getKeysErr = s.Store.EachKeyMatch(targetPrefix)
+	if getKeysErr != nil {
+		return nil, nerror.WrapOnly(getKeysErr)
+	}
+
+	var sessionDataList, getDataErr = s.Store.GetAnyKeys(sessionKeys...)
+	if getDataErr != nil {
+		return nil, nerror.WrapOnly(getDataErr)
+	}
+
+	if len(sessionDataList) == 0 {
+		return nil, nerror.New("has no sessions")
 	}
 
 	var sessions = make([]Session, 0, len(sessionDataList))
@@ -255,6 +254,21 @@ func (s *SessionStore) GetAllForUser(ctx context.Context, userId string) ([]Sess
 	return sessions, nil
 }
 
+func (s *SessionStore) Has(ctx context.Context, sid string, userId string) (bool, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var key = buildSessionKey(sid, userId)
+
+	var hasSession, err = s.Store.Exists(key)
+	if err != nil {
+		return false, nerror.WrapOnly(err)
+	}
+	return hasSession, nil
+}
+
 // GetByUser retrieves giving session from Store based on the provided
 // session user value.
 func (s *SessionStore) GetById(ctx context.Context, sid string, userId string) (*Session, error) {
@@ -265,12 +279,12 @@ func (s *SessionStore) GetById(ctx context.Context, sid string, userId string) (
 
 	var key = buildSessionKey(sid, userId)
 
-	var session *Session
 	var sessionBytes, err = s.Store.Get(key)
 	if err != nil {
 		return nil, nerror.WrapOnly(err)
 	}
 
+	var session *Session
 	var reader = bytes.NewReader(sessionBytes)
 	if session, err = s.Codec.Decode(reader); err != nil {
 		return nil, nerror.WrapOnly(err)
@@ -307,7 +321,7 @@ func (s *SessionStore) RemoveAllForUser(ctx context.Context, userId string) erro
 	}
 
 	var targetPrefix = buildSessionKey("*", userId)
-	var sessionKeys, getKeysErr = s.Store.EachKeyPrefix(targetPrefix)
+	var sessionKeys, getKeysErr = s.Store.EachKeyMatch(targetPrefix)
 	if getKeysErr != nil {
 		return nerror.WrapOnly(getKeysErr)
 	}
@@ -319,5 +333,5 @@ func (s *SessionStore) RemoveAllForUser(ctx context.Context, userId string) erro
 }
 
 func buildSessionKey(sessionId string, userId string) string {
-	return fmt.Sprintf("%s.%s", userId, sessionId)
+	return strings.Join([]string{userId, sessionId}, dot)
 }

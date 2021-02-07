@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dgrijalva/jwt-go"
@@ -19,17 +18,12 @@ import (
 	openTracing "github.com/opentracing/opentracing-go"
 )
 
-var mapPool = &sync.Pool{
-	New: func() interface{} {
-		return bytes.NewBuffer(make([]byte, 512))
-	},
-}
-
 const (
 	dot               = "."
 	jwtIdKey          = "jid"
 	refreshIdKey      = "rid"
 	accessIdKey       = "acid"
+	sessionIdKey      = "_session_id"
 	csrfHeader        = "_csrf"
 	dataKey           = "_data"
 	parentAccessIdKey = "pa_acid"
@@ -61,13 +55,13 @@ type JWTConfig struct {
 	Store                  nstorage.ExpirableStore
 }
 
-type JWTManufacturer struct {
+type JWTStore struct {
 	JWTConfig
 	Logger njson.Logger
 }
 
-func NewJWTManufacturer(config JWTConfig) *JWTManufacturer {
-	return &JWTManufacturer{
+func NewJWTStore(config JWTConfig) *JWTStore {
+	return &JWTStore{
 		JWTConfig: config,
 	}
 }
@@ -77,6 +71,7 @@ type DataClaim struct {
 	RefreshId      nxid.ID
 	AccessId       nxid.ID
 	ParentAccessId nxid.ID
+	SessionId      string
 	UserId         string
 	RandomId       string
 	IsUsable       bool // indicates if userId and RandomId are supplied and valid for use.
@@ -88,7 +83,7 @@ func (d *DataClaim) Decode(encodedDataClaim string) error {
 		return nerror.WrapOnly(err)
 	}
 	var decodedParts = bytes.Split(decoded, nunsafe.String2Bytes(dot))
-	if len(decodedParts) != 6 {
+	if len(decodedParts) != 7 {
 		return nerror.New("invalid encoded data token")
 	}
 
@@ -118,12 +113,13 @@ func (d *DataClaim) Decode(encodedDataClaim string) error {
 
 	d.UserId = nunsafe.Bytes2String(decodedParts[1])
 	d.RandomId = nunsafe.Bytes2String(decodedParts[5])
+	d.SessionId = nunsafe.Bytes2String(decodedParts[6])
 	d.IsUsable = true
 	return nil
 }
 
 func (d DataClaim) Encode() string {
-	var token = strings.Join([]string{d.Id.String(), d.UserId, d.RefreshId.String(), d.AccessId.String(), d.ParentAccessId.String(), d.RandomId}, dot)
+	var token = strings.Join([]string{d.Id.String(), d.UserId, d.RefreshId.String(), d.AccessId.String(), d.ParentAccessId.String(), d.RandomId, d.SessionId}, dot)
 	return base64.RawStdEncoding.EncodeToString(nunsafe.String2Bytes(token))
 }
 
@@ -136,11 +132,11 @@ type Claim struct {
 	Data           map[string]string
 }
 
-func (jm JWTManufacturer) Create(ctx context.Context, userId string, csrfToken string, data map[string]string) (Claim, error) {
-	return jm.CreateWithId(ctx, nxid.New(), userId, csrfToken, nxid.NilID(), data)
+func (jm *JWTStore) Create(ctx context.Context, sessionId string, userId string, data map[string]string) (Claim, error) {
+	return jm.CreateWithId(ctx, nxid.New(), sessionId, userId, nxid.NilID(), data)
 }
 
-func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userId string, csrfToken string, parentAccessId nxid.ID, data map[string]string) (Claim, error) {
+func (jm *JWTStore) CreateWithId(ctx context.Context, jwtId nxid.ID, sessionId string, userId string, parentAccessId nxid.ID, data map[string]string) (Claim, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -152,6 +148,7 @@ func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userI
 	c.Data = data
 	c.DataClaim.Id = jwtId
 	c.DataClaim.UserId = userId
+	c.DataClaim.SessionId = sessionId
 	c.DataClaim.RefreshId = nxid.New()
 	c.DataClaim.AccessId = nxid.New()
 	c.DataClaim.ParentAccessId = parentAccessId
@@ -175,8 +172,8 @@ func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userI
 	// create claim for access token.
 	var reMappedAccessClaim, signingMethodForAccess, signingKeyForAccess = jm.GetNewClaim()
 
-	var encodedMapData = mapPool.Get().(*bytes.Buffer)
-	defer mapPool.Put(encodedMapData)
+	var encodedMapData = bufferPool.Get().(*bytes.Buffer)
+	defer bufferPool.Put(encodedMapData)
 
 	encodedMapData.Reset()
 
@@ -195,7 +192,7 @@ func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userI
 	reMappedAccessClaim[refreshIdKey] = c.RefreshId.String()
 	reMappedAccessClaim[parentAccessIdKey] = parentAccessId
 	reMappedAccessClaim[jwtIdKey] = c.Id.String()
-	reMappedAccessClaim[csrfHeader] = csrfToken
+	reMappedAccessClaim[sessionIdKey] = sessionId
 	reMappedAccessClaim["exp"] = accessExpiration.Unix()
 	reMappedAccessClaim["iss"] = jm.Issuer
 	reMappedAccessClaim["aud"] = userId
@@ -239,13 +236,24 @@ func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userI
 		return c, nerror.WrapOnly(saveErr)
 	}
 
+	var formattedRefreshAndAccessId = jm.formatAccessIdAndRefreshId(c.AccessId.String(), c.RefreshId.String())
 	var formattedJwtId = jm.formatJwtId(c.Id.String())
 	if saveErr := jm.Store.SaveTTL(
 		formattedJwtId,
-		nunsafe.String2Bytes(jm.formatAccessIdAndRefreshId(c.AccessId.String(), c.RefreshId.String())),
+		nunsafe.String2Bytes(formattedRefreshAndAccessId),
 		jm.RefreshTokenExpiration,
 	); saveErr != nil {
 		_ = jm.Store.RemoveKeys(formattedAccessId, formattedRefreshId, formattedJwtDataId)
+		return c, nerror.WrapOnly(saveErr)
+	}
+
+	var formattedSessionJwtId = jm.formatSessionJwtId(c.Id.String(), sessionId)
+	if saveErr := jm.Store.SaveTTL(
+		formattedSessionJwtId,
+		nunsafe.String2Bytes(formattedRefreshAndAccessId),
+		jm.RefreshTokenExpiration,
+	); saveErr != nil {
+		_ = jm.Store.RemoveKeys(formattedAccessId, formattedRefreshId, formattedJwtDataId, formattedJwtId)
 		return c, nerror.WrapOnly(saveErr)
 	}
 
@@ -254,7 +262,7 @@ func (jm JWTManufacturer) CreateWithId(ctx context.Context, jwtId nxid.ID, userI
 
 // VerifyAccess verifies provided accessToken returning claim extracted from the valid jwt signed
 // token.
-func (jm JWTManufacturer) VerifyAccess(ctx context.Context, accessToken string, expectedCsrfToken string) (Claim, *jwt.Token, error) {
+func (jm *JWTStore) VerifyAccess(ctx context.Context, accessToken string) (Claim, *jwt.Token, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -304,6 +312,13 @@ func (jm JWTManufacturer) VerifyAccess(ctx context.Context, accessToken string, 
 
 		c.Data = decodedMap
 	}
+
+	var sessionId, hasSessionId = mappedClaims[sessionIdKey].(string)
+	if !hasSessionId {
+		return c, nil, nerror.New("claims has no sessionId")
+	}
+
+	c.SessionId = sessionId
 
 	var accessId, hasAccessId = mappedClaims[accessIdKey].(string)
 	if !hasAccessId {
@@ -356,15 +371,6 @@ func (jm JWTManufacturer) VerifyAccess(ctx context.Context, accessToken string, 
 		return c, nil, nerror.New("claims userId is not valid")
 	}
 
-	var csrfTokenFromClaim, hasCsrfToken = mappedClaims[csrfHeader].(string)
-	if !hasCsrfToken {
-		return c, nil, nerror.New("claims has no csrf token header")
-	}
-
-	if expectedCsrfToken != csrfTokenFromClaim {
-		return c, nil, nerror.New("claims csrfToken does not match expected")
-	}
-
 	var jwtIssuer, hasJwtIssuer = mappedClaims["iss"].(string)
 	if !hasJwtIssuer {
 		return c, nil, nerror.New("claims has no issuer")
@@ -408,7 +414,7 @@ func (jm JWTManufacturer) VerifyAccess(ctx context.Context, accessToken string, 
 
 // Refresh refreshes users authentication with new access token and refresh token pair by
 // using a non expired refresh token to recreate associated pair.
-func (jm JWTManufacturer) Refresh(ctx context.Context, refreshToken string, csrfToken string) (Claim, error) {
+func (jm *JWTStore) Refresh(ctx context.Context, refreshToken string) (Claim, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -476,7 +482,7 @@ func (jm JWTManufacturer) Refresh(ctx context.Context, refreshToken string, csrf
 
 	// Create new jwt claim
 	var newClaimErr error
-	c, newClaimErr = jm.CreateWithId(ctx, c.Id, c.UserId, csrfToken, c.AccessId, jwtDataMap)
+	c, newClaimErr = jm.CreateWithId(ctx, c.Id, c.SessionId, c.UserId, c.AccessId, jwtDataMap)
 	if newClaimErr != nil {
 		return c, nerror.WrapOnly(newClaimErr)
 	}
@@ -490,7 +496,7 @@ func (jm JWTManufacturer) Refresh(ctx context.Context, refreshToken string, csrf
 	return c, nil
 }
 
-func (jm JWTManufacturer) GetToken(ctx context.Context, token string) (*jwt.Token, jwt.MapClaims, error) {
+func (jm *JWTStore) GetToken(ctx context.Context, token string) (*jwt.Token, jwt.MapClaims, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -522,11 +528,47 @@ func (jm JWTManufacturer) GetToken(ctx context.Context, token string) (*jwt.Toke
 	return parsedClaim, mappedClaim, nil
 }
 
+// RemoveWithJwtIdAndSessionId removes both the respective jwt id and associated refresh and access id's
+// related to the jwt, there by rendering all user's jwt access for this invalid.
+//
+// Delete this, delete both access and refresh at once.
+func (jm *JWTStore) RemoveWithJwtIdAndSessionId(ctx context.Context, jwtId string, sessionId string) error {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	_ = ctx
+
+	// if we are able to get refreshkey then it's not expired.
+	var key = jm.formatJwtId(jwtId)
+	var refreshIdAndAccessIdBytes, getJwtIdErr = jm.Store.Get(key)
+	if getJwtIdErr != nil {
+		return nerror.WrapOnly(getJwtIdErr)
+	}
+
+	var valueString = nunsafe.Bytes2String(refreshIdAndAccessIdBytes)
+	var accessId, refreshId, decodeErr = jm.splitFormattedAccessIdAndRefreshId(valueString)
+	if decodeErr != nil {
+		return nerror.WrapOnly(decodeErr)
+	}
+
+	var refreshKey = jm.formatRefreshId(refreshId)
+	var accessKey = jm.formatAccessId(accessId)
+	var sessionKey = jm.formatSessionJwtId(jwtId, sessionId)
+
+	if formatErr := jm.Store.RemoveKeys(refreshKey, accessKey, sessionKey, key); formatErr != nil {
+		return nerror.WrapOnly(formatErr)
+	}
+
+	return nil
+}
+
 // RemoveJWTId removes both the respective jwt id and associated refresh and access id's
 // related to the jwt, there by rendering all user's jwt access for this invalid.
 //
 // Delete this, delete both access and refresh at once.
-func (jm JWTManufacturer) RemoveJwtId(ctx context.Context, jwtId string) error {
+func (jm *JWTStore) RemoveJwtId(ctx context.Context, jwtId string) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -559,7 +601,7 @@ func (jm JWTManufacturer) RemoveJwtId(ctx context.Context, jwtId string) error {
 
 // RemoveRefreshId removes a refreshId from store if it exists and return associated refresh Token.
 // Doing this makes a refreshId invalid and un-usable.
-func (jm JWTManufacturer) RemoveRefreshId(ctx context.Context, refreshId string) (string, error) {
+func (jm *JWTStore) RemoveRefreshId(ctx context.Context, refreshId string) (string, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -579,7 +621,7 @@ func (jm JWTManufacturer) RemoveRefreshId(ctx context.Context, refreshId string)
 
 // RemoveAcessId removes a refreshId from store if it exists and return associated userId.
 // Doing this makes a refreshId invalid and un-usable.
-func (jm JWTManufacturer) RemoveAccessId(ctx context.Context, accessId string) (string, error) {
+func (jm *JWTStore) RemoveAccessId(ctx context.Context, accessId string) (string, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -598,7 +640,7 @@ func (jm JWTManufacturer) RemoveAccessId(ctx context.Context, accessId string) (
 	return userId, nil
 }
 
-func (jm JWTManufacturer) GetRefreshTokenById(ctx context.Context, refreshId string) (string, error) {
+func (jm *JWTStore) GetRefreshTokenById(ctx context.Context, refreshId string) (string, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -617,7 +659,7 @@ func (jm JWTManufacturer) GetRefreshTokenById(ctx context.Context, refreshId str
 	return userId, nil
 }
 
-func (jm JWTManufacturer) GetJwtDataById(ctx context.Context, id string) (map[string]string, error) {
+func (jm *JWTStore) GetJwtDataById(ctx context.Context, id string) (map[string]string, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -651,7 +693,7 @@ func (jm JWTManufacturer) GetJwtDataById(ctx context.Context, id string) (map[st
 	return jwtDataMap, nil
 }
 
-func (jm JWTManufacturer) GetAccessIdAndRefreshIdByJwtId(ctx context.Context, jwtId string) (accessId string, refreshId string, err error) {
+func (jm *JWTStore) GetAccessIdAndRefreshIdByJwtId(ctx context.Context, jwtId string) (accessId string, refreshId string, err error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -673,7 +715,7 @@ func (jm JWTManufacturer) GetAccessIdAndRefreshIdByJwtId(ctx context.Context, jw
 	return
 }
 
-func (jm JWTManufacturer) GetUserIdByAccessId(ctx context.Context, accessId string) (string, error) {
+func (jm *JWTStore) GetUserIdByAccessId(ctx context.Context, accessId string) (string, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -691,7 +733,7 @@ func (jm JWTManufacturer) GetUserIdByAccessId(ctx context.Context, accessId stri
 	return nunsafe.Bytes2String(userIdBytes), nil
 }
 
-func (jm JWTManufacturer) GetAllAccessIds(ctx context.Context) ([]string, error) {
+func (jm *JWTStore) RemoveAllSessionJwt(ctx context.Context, sessionId string) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -699,7 +741,79 @@ func (jm JWTManufacturer) GetAllAccessIds(ctx context.Context) ([]string, error)
 
 	_ = ctx
 
-	var idList, err = jm.Store.EachKeyPrefix(accessIdPrefix)
+	var sessionPrefix = sessionId + dot
+	var idList, err = jm.Store.EachKeyMatch(sessionPrefix)
+	if err != nil {
+		return nerror.WrapOnly(err)
+	}
+
+	var valueErr = jm.Store.RemoveKeys(idList...)
+	if valueErr != nil {
+		return nerror.WrapOnly(valueErr)
+	}
+	return nil
+}
+
+type JwtInfo struct {
+	RefreshId string
+	AccessId  string
+}
+
+func (jm *JWTStore) GetAllSessionJwt(ctx context.Context, sessionId string) (map[string]JwtInfo, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	_ = ctx
+
+	var sessionPrefix = sessionId + dot
+	var idList, err = jm.Store.EachKeyMatch(sessionPrefix)
+	if err != nil {
+		return nil, nerror.WrapOnly(err)
+	}
+
+	var valueList, valueErr = jm.Store.GetAnyKeys(idList...)
+	if valueErr != nil {
+		return nil, nerror.WrapOnly(valueErr)
+	}
+
+	if len(idList) != len(valueList) {
+		return nil, nerror.New("expected length of keys to values to match")
+	}
+
+	var set = map[string]JwtInfo{}
+	for index, id := range idList {
+		var valueBytes = valueList[index]
+		if len(valueBytes) == 0 {
+			continue
+		}
+
+		var refreshId, accessId, splitErr = jm.splitFormattedAccessIdAndRefreshId(
+			nunsafe.Bytes2String(valueBytes),
+		)
+		if splitErr != nil {
+			return nil, nerror.WrapOnly(splitErr)
+		}
+
+		var jwtId = strings.TrimPrefix(id, sessionPrefix)
+		set[jwtId] = JwtInfo{
+			RefreshId: refreshId,
+			AccessId:  accessId,
+		}
+	}
+	return set, nil
+}
+
+func (jm *JWTStore) GetAllAccessIds(ctx context.Context) ([]string, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	_ = ctx
+
+	var idList, err = jm.Store.EachKeyMatch(accessIdPrefix)
 	if err != nil {
 		return nil, nerror.WrapOnly(err)
 	}
@@ -711,7 +825,7 @@ func (jm JWTManufacturer) GetAllAccessIds(ctx context.Context) ([]string, error)
 	return decodedList, err
 }
 
-func (jm JWTManufacturer) GetAllRefreshIds(ctx context.Context) ([]string, error) {
+func (jm *JWTStore) GetAllRefreshIds(ctx context.Context) ([]string, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -719,7 +833,7 @@ func (jm JWTManufacturer) GetAllRefreshIds(ctx context.Context) ([]string, error
 
 	_ = ctx
 
-	var idList, err = jm.Store.EachKeyPrefix(refreshIdPrefix)
+	var idList, err = jm.Store.EachKeyMatch(refreshIdPrefix)
 	if err != nil {
 		return nil, nerror.WrapOnly(err)
 	}
@@ -731,7 +845,7 @@ func (jm JWTManufacturer) GetAllRefreshIds(ctx context.Context) ([]string, error
 	return decodedList, err
 }
 
-func (jm JWTManufacturer) GetAllJwtIds(ctx context.Context) ([]string, error) {
+func (jm *JWTStore) GetAllJwtIds(ctx context.Context) ([]string, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -739,7 +853,7 @@ func (jm JWTManufacturer) GetAllJwtIds(ctx context.Context) ([]string, error) {
 
 	_ = ctx
 
-	var idList, err = jm.Store.EachKeyPrefix(jwtIdPrefix)
+	var idList, err = jm.Store.EachKeyMatch(jwtIdPrefix)
 	if err != nil {
 		return nil, nerror.WrapOnly(err)
 	}
@@ -753,33 +867,37 @@ func (jm JWTManufacturer) GetAllJwtIds(ctx context.Context) ([]string, error) {
 
 var jwtDataPrefix = "jwtData."
 
-func (jm JWTManufacturer) formatJwtData(id string) string {
+func (jm *JWTStore) formatJwtData(id string) string {
 	return jwtDataPrefix + id
 }
 
 var jwtIdPrefix = "jwtId."
 
-func (jm JWTManufacturer) formatJwtId(id string) string {
+func (jm *JWTStore) formatJwtId(id string) string {
 	return jwtIdPrefix + id
 }
 
 var refreshIdPrefix = "refreshId."
 
-func (jm JWTManufacturer) formatRefreshId(refreshId string) string {
+func (jm *JWTStore) formatRefreshId(refreshId string) string {
 	return refreshIdPrefix + refreshId
 }
 
 var accessIdPrefix = "accessId."
 
-func (jm JWTManufacturer) formatAccessId(accessId string) string {
+func (jm *JWTStore) formatAccessId(accessId string) string {
 	return accessIdPrefix + accessId
 }
 
-func (jm JWTManufacturer) formatAccessIdAndRefreshId(accessId string, refreshId string) string {
+func (jm *JWTStore) formatSessionJwtId(jwtId string, sessionId string) string {
+	return sessionId + dot + jwtId
+}
+
+func (jm *JWTStore) formatAccessIdAndRefreshId(accessId string, refreshId string) string {
 	return accessId + dot + refreshId
 }
 
-func (jm JWTManufacturer) splitFormattedAccessIdAndRefreshId(joinedId string) (accessId string, refreshId string, err error) {
+func (jm *JWTStore) splitFormattedAccessIdAndRefreshId(joinedId string) (accessId string, refreshId string, err error) {
 	var parts = strings.Split(joinedId, dot)
 	if len(parts) != 2 {
 		err = nerror.New("invalid number of parts of joined accessId and refreshId, expected 2")

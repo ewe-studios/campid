@@ -9,13 +9,13 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-// MsgPackSessionCodec implements the SessionCodec interface for using
+// MsgPackGroupCodec implements the GroupCodec interface for using
 // the MsgPack Codec.
-type MsgPackSessionCodec struct{}
+type MsgPackGroupCodec struct{}
 
 // Encode encodes giving session using the internal MsgPack format.
 // Returning provided data.
-func (gb *MsgPackSessionCodec) Encode(w io.Writer, s *Session) error {
+func (gb *MsgPackGroupCodec) Encode(w io.Writer, s Group) error {
 	if err := msgpack.NewEncoder(w).Encode(s); err != nil {
 		return nerror.Wrap(err, "Failed to encode giving session")
 	}
@@ -23,21 +23,21 @@ func (gb *MsgPackSessionCodec) Encode(w io.Writer, s *Session) error {
 }
 
 // Decode decodes giving data into provided session instance.
-func (gb *MsgPackSessionCodec) Decode(r io.Reader) (*Session, error) {
-	var s Session
+func (gb *MsgPackGroupCodec) Decode(r io.Reader) (Group, error) {
+	var s Group
 	if err := msgpack.NewDecoder(r).Decode(&s); err != nil {
-		return &s, nerror.WrapOnly(err)
+		return s, nerror.WrapOnly(err)
 	}
-	return &s, nil
+	return s, nil
 }
 
-// JsonSessionCodec implements the SessionCodec interface for using
+// JsonGroupCodec implements the GroupCodec interface for using
 // the Json Codec.
-type JsonSessionCodec struct{}
+type JsonGroupCodec struct{}
 
 // Encode encodes giving session using the internal Json format.
 // Returning provided data.
-func (gb *JsonSessionCodec) Encode(w io.Writer, s *Session) error {
+func (gb *JsonGroupCodec) Encode(w io.Writer, s Group) error {
 	if err := json.NewEncoder(w).Encode(s); err != nil {
 		return nerror.Wrap(err, "Failed to encode giving session")
 	}
@@ -45,21 +45,21 @@ func (gb *JsonSessionCodec) Encode(w io.Writer, s *Session) error {
 }
 
 // Decode decodes giving data into provided session instance.
-func (gb *JsonSessionCodec) Decode(r io.Reader) (*Session, error) {
-	var s Session
+func (gb *JsonGroupCodec) Decode(r io.Reader) (Group, error) {
+	var s Group
 	if err := json.NewDecoder(r).Decode(&s); err != nil {
-		return &s, nerror.WrapOnly(err)
+		return s, nerror.WrapOnly(err)
 	}
-	return &s, nil
+	return s, nil
 }
 
-// GobSessionCodec implements the SessionCodec interface for using
+// GobGroupCodec implements the GroupCodec interface for using
 // the gob Codec.
-type GobSessionCodec struct{}
+type GobGroupCodec struct{}
 
 // Encode encodes giving session using the internal gob format.
 // Returning provided data.
-func (gb *GobSessionCodec) Encode(w io.Writer, s *Session) error {
+func (gb *GobGroupCodec) Encode(w io.Writer, s Group) error {
 	if err := gob.NewEncoder(w).Encode(s); err != nil {
 		return nerror.Wrap(err, "Failed to encode giving session")
 	}
@@ -67,10 +67,10 @@ func (gb *GobSessionCodec) Encode(w io.Writer, s *Session) error {
 }
 
 // Decode decodes giving data into provided session instance.
-func (gb *GobSessionCodec) Decode(r io.Reader) (*Session, error) {
-	var s Session
+func (gb *GobGroupCodec) Decode(r io.Reader) (Group, error) {
+	var s Group
 	if err := gob.NewDecoder(r).Decode(&s); err != nil {
-		return &s, nerror.WrapOnly(err)
+		return s, nerror.WrapOnly(err)
 	}
-	return &s, nil
+	return s, nil
 }

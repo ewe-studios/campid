@@ -36,11 +36,12 @@ func TestUserStore(t *testing.T) {
 	var store = nmap.NewExprByteStore(100)
 
 	t.Run("Add", func(t *testing.T) {
+		os.RemoveAll(t.Name())
+
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
 		require.NoError(t, indexerErr)
 		require.NotNil(t, indexer)
 
-		defer os.RemoveAll(t.Name())
 		defer indexer.Close()
 
 		var userStore = NewUserStore(
@@ -60,11 +61,12 @@ func TestUserStore(t *testing.T) {
 	})
 
 	t.Run("Update", func(t *testing.T) {
+		os.RemoveAll(t.Name())
+
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
 		require.NoError(t, indexerErr)
 		require.NotNil(t, indexer)
 
-		defer os.RemoveAll(t.Name())
 		defer indexer.Close()
 
 		var userStore = NewUserStore(
@@ -98,11 +100,12 @@ func TestUserStore(t *testing.T) {
 	})
 
 	t.Run("ByPid", func(t *testing.T) {
+		os.RemoveAll(t.Name())
+
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
 		require.NoError(t, indexerErr)
 		require.NotNil(t, indexer)
 
-		defer os.RemoveAll(t.Name())
 		defer indexer.Close()
 
 		var userStore = NewUserStore(
@@ -128,11 +131,12 @@ func TestUserStore(t *testing.T) {
 	})
 
 	t.Run("ById", func(t *testing.T) {
+		os.RemoveAll(t.Name())
+
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
 		require.NoError(t, indexerErr)
 		require.NotNil(t, indexer)
 
-		defer os.RemoveAll(t.Name())
 		defer indexer.Close()
 
 		var userStore = NewUserStore(
@@ -158,11 +162,12 @@ func TestUserStore(t *testing.T) {
 	})
 
 	t.Run("ByEmail", func(t *testing.T) {
+		os.RemoveAll(t.Name())
+
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
 		require.NoError(t, indexerErr)
 		require.NotNil(t, indexer)
 
-		defer os.RemoveAll(t.Name())
 		defer indexer.Close()
 
 		var userStore = NewUserStore(
@@ -188,11 +193,12 @@ func TestUserStore(t *testing.T) {
 	})
 
 	t.Run("ByPhone", func(t *testing.T) {
+		os.RemoveAll(t.Name())
+
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
 		require.NoError(t, indexerErr)
 		require.NotNil(t, indexer)
 
-		defer os.RemoveAll(t.Name())
 		defer indexer.Close()
 
 		var userStore = NewUserStore(
@@ -218,11 +224,12 @@ func TestUserStore(t *testing.T) {
 	})
 
 	t.Run("HasEmail", func(t *testing.T) {
+		os.RemoveAll(t.Name())
+
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
 		require.NoError(t, indexerErr)
 		require.NotNil(t, indexer)
 
-		defer os.RemoveAll(t.Name())
 		defer indexer.Close()
 
 		var userStore = NewUserStore(
@@ -246,11 +253,12 @@ func TestUserStore(t *testing.T) {
 	})
 
 	t.Run("HasPhone", func(t *testing.T) {
+		os.RemoveAll(t.Name())
+
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
 		require.NoError(t, indexerErr)
 		require.NotNil(t, indexer)
 
-		defer os.RemoveAll(t.Name())
 		defer indexer.Close()
 
 		var userStore = NewUserStore(
@@ -274,7 +282,7 @@ func TestUserStore(t *testing.T) {
 	})
 
 	t.Run("RemoveById", func(t *testing.T) {
-		require.NoError(t, os.RemoveAll(t.Name()))
+		os.RemoveAll(t.Name())
 
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
 		require.NoError(t, indexerErr)
@@ -305,11 +313,12 @@ func TestUserStore(t *testing.T) {
 	})
 
 	t.Run("RemoveByPid", func(t *testing.T) {
+		os.RemoveAll(t.Name())
+
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
 		require.NoError(t, indexerErr)
 		require.NotNil(t, indexer)
 
-		defer os.RemoveAll(t.Name())
 		defer indexer.Close()
 
 		var userStore = NewUserStore(

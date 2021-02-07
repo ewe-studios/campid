@@ -17,7 +17,66 @@ import (
 	"github.com/influx6/npkg/nunsafe"
 	"github.com/influx6/npkg/nxid"
 	openTracing "github.com/opentracing/opentracing-go"
+	"golang.org/x/crypto/bcrypt"
 )
+
+// Password is a credential validator for password authentication.
+type Password struct {
+	// Cost is the bcrypt hash repetition. Higher Cost results
+	// in slower computations.
+	Cost int
+
+	// MinLength is the minimum length of a password.
+	MinLength int
+
+	// MaxLength is the maximum length of a password.
+	// We enforce a maximum length to mitigate DOS attacks.
+	MaxLength int
+}
+
+// HashString hashes a password for storage.
+func (p *Password) HashString(password string) (string, error) {
+	// bcrypt will manage its own salt
+	hashBytes, err := p.Hash(password)
+	if err != nil {
+		return "", err
+	}
+
+	return nunsafe.Bytes2String(hashBytes), nil
+}
+
+// Hash hashes a password for storage.
+func (p *Password) Hash(password string) ([]byte, error) {
+	// bcrypt will manage its own salt
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), p.Cost)
+	if err != nil {
+		return nil, err
+	}
+
+	return hash, nil
+}
+
+// Validate validates if a submitted password is valid for a
+// stored password hash.
+func (p *Password) Validate(user *User, password string) error {
+	bPasswdHash := []byte(user.HashedPassword)
+	bPasswd := []byte(password)
+	return bcrypt.CompareHashAndPassword(bPasswdHash, bPasswd)
+}
+
+// OKForUser tells us if a password meets minimum requirements to
+// be set for any users.
+func (p *Password) OKForUser(password string) error {
+	if len(password) < p.MinLength {
+		return nerror.New("password must be at least %v characters long", p.MinLength)
+	}
+
+	if len(password) > p.MaxLength {
+		return nerror.New("password cannot be longer than %v characters", p.MaxLength)
+	}
+
+	return nil
+}
 
 type User struct {
 	Id             string // public id, is user or service provided.
@@ -98,7 +157,7 @@ func (u *User) validate() nerror.ErrorStack {
 	return errs
 }
 
-type UserCodec interface {
+type RoleDoec interface {
 	Decode(r io.Reader) (*User, error)
 	Encode(w io.Writer, s *User) error
 }
@@ -140,12 +199,12 @@ func CreateUserDocumentMapping() (*mapping.DocumentMapping, error) {
 }
 
 type UserStore struct {
-	Codec   UserCodec
+	Codec   RoleDoec
 	Indexer bleve.Index
 	Store   nstorage.ExpirableStore
 }
 
-func NewUserStore(store nstorage.ExpirableStore, codec UserCodec, indexer bleve.Index) *UserStore {
+func NewUserStore(store nstorage.ExpirableStore, codec RoleDoec, indexer bleve.Index) *UserStore {
 	return &UserStore{
 		Codec:   codec,
 		Store:   store,
@@ -280,6 +339,10 @@ func (u *UserStore) RemoveById(ctx context.Context, id string) (*User, error) {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
 
+	if indexDelErr := u.Indexer.Delete(decodedUser.Pid); indexDelErr != nil {
+		return decodedUser, nerror.WrapOnly(indexDelErr)
+	}
+
 	return decodedUser, nil
 }
 
@@ -302,6 +365,10 @@ func (u *UserStore) RemoveByPid(ctx context.Context, pid string) (*User, error) 
 	var _, removeIdErr = u.Store.Remove(decodedUser.Id)
 	if removeIdErr != nil {
 		return nil, nerror.WrapOnly(removeIdErr)
+	}
+
+	if indexDelErr := u.Indexer.Delete(decodedUser.Pid); indexDelErr != nil {
+		return decodedUser, nerror.WrapOnly(indexDelErr)
 	}
 
 	return decodedUser, nil
