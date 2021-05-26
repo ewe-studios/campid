@@ -37,7 +37,7 @@ func TestUserStore(t *testing.T) {
 	var userCodec JsonUserCodec
 	var store = nmap.NewExprByteStore(100)
 
-	t.Run("Add", func(t *testing.T) {
+	t.Run("add", func(t *testing.T) {
 		os.RemoveAll(t.Name())
 
 		var indexer, indexerErr = bleve.New(t.Name(), indexMapping)
@@ -52,7 +52,7 @@ func TestUserStore(t *testing.T) {
 			indexer,
 		)
 
-		var addedUser, addErr = userStore.Add(context.Background(), sampleUser)
+		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
 		require.NoError(t, addErr)
 		require.NotNil(t, addedUser)
 		require.NotEmpty(t, addedUser.Pid)
@@ -77,7 +77,7 @@ func TestUserStore(t *testing.T) {
 			indexer,
 		)
 
-		var addedUser, addErr = userStore.Add(context.Background(), sampleUser)
+		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
 		require.NoError(t, addErr)
 		require.NotNil(t, addedUser)
 		require.NotEmpty(t, addedUser.Pid)
@@ -116,7 +116,7 @@ func TestUserStore(t *testing.T) {
 			indexer,
 		)
 
-		var addedUser, addErr = userStore.Add(context.Background(), sampleUser)
+		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
 		require.NoError(t, addErr)
 		require.NotNil(t, addedUser)
 		require.NotEmpty(t, addedUser.Pid)
@@ -147,7 +147,7 @@ func TestUserStore(t *testing.T) {
 			indexer,
 		)
 
-		var addedUser, addErr = userStore.Add(context.Background(), sampleUser)
+		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
 		require.NoError(t, addErr)
 		require.NotNil(t, addedUser)
 		require.NotEmpty(t, addedUser.Pid)
@@ -178,7 +178,7 @@ func TestUserStore(t *testing.T) {
 			indexer,
 		)
 
-		var addedUser, addErr = userStore.Add(context.Background(), sampleUser)
+		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
 		require.NoError(t, addErr)
 		require.NotNil(t, addedUser)
 		require.NotEmpty(t, addedUser.Pid)
@@ -209,7 +209,7 @@ func TestUserStore(t *testing.T) {
 			indexer,
 		)
 
-		var addedUser, addErr = userStore.Add(context.Background(), sampleUser)
+		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
 		require.NoError(t, addErr)
 		require.NotNil(t, addedUser)
 		require.NotEmpty(t, addedUser.Pid)
@@ -240,7 +240,7 @@ func TestUserStore(t *testing.T) {
 			indexer,
 		)
 
-		var addedUser, addErr = userStore.Add(context.Background(), sampleUser)
+		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
 		require.NoError(t, addErr)
 		require.NotNil(t, addedUser)
 		require.NotEmpty(t, addedUser.Pid)
@@ -269,7 +269,7 @@ func TestUserStore(t *testing.T) {
 			indexer,
 		)
 
-		var addedUser, addErr = userStore.Add(context.Background(), sampleUser)
+		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
 		require.NoError(t, addErr)
 		require.NotNil(t, addedUser)
 		require.NotEmpty(t, addedUser.Pid)
@@ -298,7 +298,7 @@ func TestUserStore(t *testing.T) {
 			indexer,
 		)
 
-		var addedUser, addErr = userStore.Add(context.Background(), sampleUser)
+		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
 		require.NoError(t, addErr)
 		require.NotNil(t, addedUser)
 		require.NotEmpty(t, addedUser.Pid)
@@ -329,7 +329,7 @@ func TestUserStore(t *testing.T) {
 			indexer,
 		)
 
-		var addedUser, addErr = userStore.Add(context.Background(), sampleUser)
+		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
 		require.NoError(t, addErr)
 		require.NotNil(t, addedUser)
 		require.NotEmpty(t, addedUser.Pid)

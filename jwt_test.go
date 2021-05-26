@@ -44,7 +44,7 @@ func TestJwtManufacturer(t *testing.T) {
 
 	var ctx = context.Background()
 
-	t.Run("Create", func(t *testing.T) {
+	t.Run("CreateZone", func(t *testing.T) {
 		store.Clear()
 
 		var claim, err = manager.Create(ctx, mySessionId, myUser, nil)

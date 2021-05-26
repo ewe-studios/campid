@@ -41,7 +41,7 @@ func TestDeviceStore(t *testing.T) {
 
 	var ctx = context.Background()
 
-	t.Run("Create", func(t *testing.T) {
+	t.Run("CreateZone", func(t *testing.T) {
 		defer os.RemoveAll(t.Name())
 		os.RemoveAll(t.Name())
 		store.Clear()
@@ -123,7 +123,7 @@ func TestDeviceStore(t *testing.T) {
 		require.NoError(t, retreiveErr)
 		require.NotEmpty(t, records)
 	})
-	t.Run("Remove", func(t *testing.T) {
+	t.Run("remove", func(t *testing.T) {
 		defer os.RemoveAll(t.Name())
 		os.RemoveAll(t.Name())
 		store.Clear()

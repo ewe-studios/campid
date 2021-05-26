@@ -6,7 +6,7 @@ import (
 )
 
 type JSONSession struct {
-	*Session
+	*Zone
 }
 
 // EncodeForCookie encodes giving session to npkg.ObjectEncoder for

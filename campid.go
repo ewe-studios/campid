@@ -8,15 +8,11 @@ import (
 	"github.com/influx6/npkg/nerror"
 )
 
-type EmailLogin struct {
-	Email    string
-	Password string
-}
-
-type UsernameLogin struct {
-	Username string
-	Password string
-}
+const (
+	UserAgentHeader  = "User-Agent"
+	DeviceCookieName = "SABU_DeviceCookie"
+	DeviceHeaderName = "X-SABU-Device"
+)
 
 type Mail struct {
 	Email       string
@@ -73,6 +69,6 @@ func CreateIndexMappingForAll() (mapping.IndexMapping, error) {
 	indexMapping.AddDocumentMapping("Device", deviceMapping)
 	indexMapping.AddDocumentMapping("Role", roleMapping)
 	indexMapping.AddDocumentMapping("Group", groupMapping)
-	indexMapping.AddDocumentMapping("Session", sessionMapping)
+	indexMapping.AddDocumentMapping("Zone", sessionMapping)
 	return indexMapping, nil
 }

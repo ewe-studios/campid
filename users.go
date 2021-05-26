@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
@@ -47,6 +48,10 @@ func (p *Password) HashString(password string) (string, error) {
 
 // Hash hashes a password for storage.
 func (p *Password) Hash(password string) ([]byte, error) {
+	if passwordNotOk := p.OKForUser(password); passwordNotOk != nil {
+		return nil, passwordNotOk
+	}
+
 	// bcrypt will manage its own salt
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), p.Cost)
 	if err != nil {
@@ -76,6 +81,56 @@ func (p *Password) OKForUser(password string) error {
 	}
 
 	return nil
+}
+
+type NewUser struct {
+	FirstName  string
+	LastName   string
+	MiddleName string
+	Email      string
+	Phone      string
+	Password   string
+}
+
+func (u NewUser) ToUser() User {
+	return User{
+		Id:         nxid.New().String(),
+		MiddleName: u.MiddleName,
+		FirstName:  u.FirstName,
+		LastName:   u.LastName,
+		Email:      u.Email,
+		Phone:      u.Phone,
+	}
+}
+
+func (u NewUser) Validate() nerror.ErrorStack {
+	var errs = nerror.ErrorStack{}
+	if len(u.Email) == 0 && len(u.Phone) == 0 {
+		errs.Add("User.Email or User.Phone is required")
+	}
+	if len(u.FirstName) == 0 {
+		errs.Add("User.FirstName is required")
+	}
+	if len(u.MiddleName) == 0 {
+		errs.Add("User.MiddleName is required")
+	}
+	if len(u.LastName) == 0 {
+		errs.Add("User.LastName is required")
+	}
+	if len(u.Password) == 0 {
+		errs.Add("User.Password is required")
+	}
+	return errs
+}
+
+type NewUserCodec interface {
+	Decode(r io.Reader) (NewUser, error)
+	Encode(w io.Writer, s NewUser) error
+}
+
+type UserCreated struct {
+	User User
+	When time.Time
 }
 
 type User struct {
@@ -142,9 +197,6 @@ func (u *User) validate() nerror.ErrorStack {
 	if len(u.FirstName) == 0 {
 		errs.Add("User.FirstName is required")
 	}
-	if len(u.Phone) == 0 {
-		errs.Add("User.Phone is required")
-	}
 	if len(u.Email) == 0 {
 		errs.Add("User.Email is required")
 	}
@@ -157,7 +209,7 @@ func (u *User) validate() nerror.ErrorStack {
 	return errs
 }
 
-type RoleDoec interface {
+type UserCodec interface {
 	Decode(r io.Reader) (*User, error)
 	Encode(w io.Writer, s *User) error
 }
@@ -182,6 +234,9 @@ func CreateUserDocumentMapping() (*mapping.DocumentMapping, error) {
 	var textField = bleve.NewTextFieldMapping()
 	textField.Analyzer = keyword.Name
 
+	var phoneField = bleve.NewTextFieldMapping()
+	phoneField.Analyzer = keyword.Name
+
 	var booleanField = bleve.NewBooleanFieldMapping()
 	booleanField.Analyzer = keyword.Name
 
@@ -191,7 +246,7 @@ func CreateUserDocumentMapping() (*mapping.DocumentMapping, error) {
 	userMapping.AddFieldMappingsAt("MiddleName", textField)
 	userMapping.AddFieldMappingsAt("LastName", textField)
 	userMapping.AddFieldMappingsAt("Email", englishTextField)
-	userMapping.AddFieldMappingsAt("Phone", englishTextField)
+	userMapping.AddFieldMappingsAt("Phone", phoneField)
 	userMapping.AddFieldMappingsAt("EmailVerified", booleanField)
 	userMapping.AddFieldMappingsAt("PhoneVerified", booleanField)
 
@@ -199,12 +254,12 @@ func CreateUserDocumentMapping() (*mapping.DocumentMapping, error) {
 }
 
 type UserStore struct {
-	Codec   RoleDoec
+	Codec   UserCodec
 	Indexer bleve.Index
 	Store   nstorage.ExpirableStore
 }
 
-func NewUserStore(store nstorage.ExpirableStore, codec RoleDoec, indexer bleve.Index) *UserStore {
+func NewUserStore(store nstorage.ExpirableStore, codec UserCodec, indexer bleve.Index) *UserStore {
 	return &UserStore{
 		Codec:   codec,
 		Store:   store,
@@ -444,7 +499,7 @@ func (u *UserStore) HasPhone(ctx context.Context, phone string) (bool, error) {
 	return false, nil
 }
 
-func (u *UserStore) Add(ctx context.Context, data User) (*User, error) {
+func (u *UserStore) Create(ctx context.Context, data User) (*User, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()

@@ -62,7 +62,7 @@ func CreateDeviceDocumentMapping() (*mapping.DocumentMapping, error) {
 	sessionMapping.AddFieldMappingsAt("Id", textField)
 	sessionMapping.AddFieldMappingsAt("FingerprintId", textField)
 	sessionMapping.AddFieldMappingsAt("UserId", textField)
-	sessionMapping.AddFieldMappingsAt("SessionId", textField)
+	sessionMapping.AddFieldMappingsAt("ZoneId", textField)
 
 	return sessionMapping, nil
 }
@@ -94,7 +94,7 @@ type Location struct {
 type DeviceInfo struct {
 	FingerprintId string
 	UserId        string
-	SessionId     string
+	ZoneId        string
 	IP            net.IP
 	Location      Location
 	Agent         *Agent
@@ -108,7 +108,7 @@ type Device struct {
 	FingerprintId string // fingerprint id or device id unique to device if available.
 	Id            string
 	UserId        string
-	SessionId     string
+	ZoneId        string
 	IP            string
 	Location      Location
 	Agent         *Agent
@@ -117,7 +117,7 @@ type Device struct {
 }
 
 func (d Device) Key() string {
-	return strings.Join([]string{d.SessionId, d.Id}, dot)
+	return strings.Join([]string{d.ZoneId, d.Id}, dot)
 }
 
 type DeviceStore struct {
@@ -199,7 +199,7 @@ func (ds *DeviceStore) Create(
 	d.IP = info.IP.String()
 	d.Location = info.Location
 	d.UserId = info.UserId
-	d.SessionId = info.SessionId
+	d.ZoneId = info.ZoneId
 	d.FingerprintId = info.FingerprintId
 
 	d.Created = time.Now()
@@ -234,7 +234,7 @@ func (ds *DeviceStore) RemoveAllDevicesForSessionId(ctx context.Context, session
 			Add("sessionId", sessionId)
 	}
 
-	var userQuery = query.NewMatchQuery("SessionId: " + sessionId)
+	var userQuery = query.NewMatchQuery("ZoneId: " + sessionId)
 	var req = bleve.NewSearchRequest(userQuery)
 
 	var searchResult, searchErr = ds.Indexer.Search(req)
@@ -279,7 +279,7 @@ func (ds *DeviceStore) GetDeviceForSessionId(ctx context.Context, sessionId stri
 	}
 
 	var idQuery = query.NewMatchQuery("Id: " + deviceId)
-	var sessionQuery = query.NewMatchQuery("SessionId: " + sessionId)
+	var sessionQuery = query.NewMatchQuery("ZoneId: " + sessionId)
 
 	var queryList = []query.Query{sessionQuery, idQuery}
 	var searchQuery = query.NewConjunctionQuery(queryList)
@@ -428,7 +428,7 @@ func (ds *DeviceStore) GetAllDevicesForSessionId(ctx context.Context, sessionId 
 			Add("sessionId", sessionId)
 	}
 
-	var userQuery = query.NewMatchQuery("SessionId: " + sessionId)
+	var userQuery = query.NewMatchQuery("ZoneId: " + sessionId)
 	var req = bleve.NewSearchRequest(userQuery)
 
 	var searchResult, searchErr = ds.Indexer.Search(req)

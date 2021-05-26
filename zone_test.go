@@ -14,7 +14,7 @@ func TestSessionStore(t *testing.T) {
 	var store = nmap.NewExprByteStore(100)
 	var sessionStore = NewSessionStore(&JsonSessionCodec{}, store)
 
-	var sz Session
+	var sz Zone
 	sz.UserId = "1"
 	sz.CsrfMessage = "m"
 	sz.Updated = time.Now()
@@ -22,7 +22,7 @@ func TestSessionStore(t *testing.T) {
 	sz.Method = "web-client"
 	sz.Id = nxid.New().String()
 
-	var sz2 Session
+	var sz2 Zone
 	sz2.UserId = "1"
 	sz2.CsrfMessage = "m"
 	sz2.Updated = time.Now()
@@ -99,7 +99,7 @@ func TestSessionStore(t *testing.T) {
 		require.NotNil(t, record)
 		require.Equal(t, record.UserId, sz.UserId)
 	})
-	t.Run("Remove", func(t *testing.T) {
+	t.Run("remove", func(t *testing.T) {
 		store.Clear()
 
 		require.NoError(t, sessionStore.Save(ctx, &sz))
@@ -113,7 +113,7 @@ func TestSessionStore(t *testing.T) {
 		require.NoError(t, hasRecordErr2)
 		require.True(t, hasRecord2)
 
-		var record, getListErr = sessionStore.Remove(ctx, sz.Id,sz.UserId)
+		var record, getListErr = sessionStore.Remove(ctx, sz.Id, sz.UserId)
 		require.NoError(t, getListErr)
 		require.NotNil(t, record)
 		require.Equal(t, record.Id, sz.Id)

@@ -28,7 +28,7 @@ var (
 	}
 )
 
-func CreateSessionDocumentMapping() (*mapping.DocumentMapping, error) {
+func CreateZoneDocumentMapping() (*mapping.DocumentMapping, error) {
 	var sessionMapping = bleve.NewDocumentMapping()
 
 	var englishTextField = bleve.NewTextFieldMapping()
@@ -52,18 +52,18 @@ func CreateSessionDocumentMapping() (*mapping.DocumentMapping, error) {
 	return sessionMapping, nil
 }
 
-type Session struct {
+type Zone struct {
 	CsrfMessage string
-	Created   time.Time
-	Updated   time.Time
-	Id        string
-	Method    string
-	UserId    string
-	Meta      map[string]string
+	Created     time.Time
+	Updated     time.Time
+	Id          string
+	Method      string
+	UserId      string
+	Meta        map[string]string
 }
 
 // Validate returns an error if giving session was invalid.
-func (s *Session) Validate() error {
+func (s *Zone) Validate() error {
 	if s.Created.IsZero() {
 		return nerror.New("session.Created has no created time stamp")
 	}
@@ -74,7 +74,7 @@ func (s *Session) Validate() error {
 		return nerror.New("session.CSrfToken must have a valid value")
 	}
 	if len(s.Id) == 0 {
-		return nerror.New("session.ID must have a valid value")
+		return nerror.New("session.Id must have a valid value")
 	}
 	if len(s.UserId) == 0 {
 		return nerror.New("session.User must have a valid value")
@@ -82,23 +82,23 @@ func (s *Session) Validate() error {
 	return nil
 }
 
-// SessionCodec exposes an interface which combines the SessionEncoder and
+// ZoneCodec exposes an interface which combines the SessionEncoder and
 // SessionDecoder interfaces.
-type SessionCodec interface {
-	Decode(r io.Reader) (*Session, error)
-	Encode(w io.Writer, s *Session) error
+type ZoneCodec interface {
+	Decode(r io.Reader) (*Zone, error)
+	Encode(w io.Writer, s *Zone) error
 }
 
-// SessionStore implements a storage type for CRUD operations on
+// ZoneStore implements a storage type for CRUD operations on
 // campId.
-type SessionStore struct {
-	Codec SessionCodec
+type ZoneStore struct {
+	Codec ZoneCodec
 	Store nstorage.ExpirableStore
 }
 
-// NewSessionStore returns a new instance of a SessionStore.
-func NewSessionStore(codec SessionCodec, store nstorage.ExpirableStore) *SessionStore {
-	return &SessionStore{
+// NewSessionStore returns a new instance of a ZoneStore.
+func NewSessionStore(codec ZoneCodec, store nstorage.ExpirableStore) *ZoneStore {
+	return &ZoneStore{
 		Codec: codec,
 		Store: store,
 	}
@@ -109,16 +109,16 @@ func NewSessionStore(codec SessionCodec, store nstorage.ExpirableStore) *Session
 // It sets the session to expire within the storage based on
 // the giving session's expiration duration.
 //
-// Save calculates the ttl by subtracting the Session.Created value from
-// the Session.Expires value.
-func (s *SessionStore) Save(ctx context.Context, se *Session) error {
+// Save calculates the ttl by subtracting the Zone.Created value from
+// the Zone.Expires value.
+func (s *ZoneStore) Save(ctx context.Context, se *Zone) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
 	}
 
 	if err := se.Validate(); err != nil {
-		return nerror.Wrap(err, "Session failed validation")
+		return nerror.Wrap(err, "Zone failed validation")
 	}
 
 	var content = bufferPool.Get().(*bytes.Buffer)
@@ -140,15 +140,15 @@ func (s *SessionStore) Save(ctx context.Context, se *Session) error {
 // Update attempts to update existing session key within Store if
 // still available.
 //
-// Update calculates the ttl by subtracting the Session.Updated value from
-// the Session.Expires value.
-func (s *SessionStore) Update(ctx context.Context, se *Session) error {
+// Update calculates the ttl by subtracting the Zone.Updated value from
+// the Zone.Expires value.
+func (s *ZoneStore) Update(ctx context.Context, se *Zone) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
 	}
 	if err := se.Validate(); err != nil {
-		return nerror.Wrap(err, "Session failed validation")
+		return nerror.Wrap(err, "Zone failed validation")
 	}
 
 	var content = bufferPool.Get().(*bytes.Buffer)
@@ -167,13 +167,13 @@ func (s *SessionStore) Update(ctx context.Context, se *Session) error {
 }
 
 // GetAll returns all sessions stored within Store.
-func (s *SessionStore) GetAll(ctx context.Context) ([]Session, error) {
+func (s *ZoneStore) GetAll(ctx context.Context) ([]Zone, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
 	}
 
-	var sessions []Session
+	var sessions []Zone
 	var err = s.Store.Each(func(content []byte, key string) error {
 		var reader = bytes.NewBuffer(content)
 		var session, decodeErr = s.Codec.Decode(reader)
@@ -190,7 +190,7 @@ func (s *SessionStore) GetAll(ctx context.Context) ([]Session, error) {
 }
 
 // GetOneForUser will return a list of all found sessions data from the underline datastore.
-func (s *SessionStore) GetOneForUser(ctx context.Context, userId string) (*Session, error) {
+func (s *ZoneStore) GetOneForUser(ctx context.Context, userId string) (*Zone, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -219,7 +219,7 @@ func (s *SessionStore) GetOneForUser(ctx context.Context, userId string) (*Sessi
 }
 
 // GetAllForUser will return a list of all found sessions data from the underline datastore.
-func (s *SessionStore) GetAllForUser(ctx context.Context, userId string) ([]Session, error) {
+func (s *ZoneStore) GetAllForUser(ctx context.Context, userId string) ([]Zone, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -239,7 +239,7 @@ func (s *SessionStore) GetAllForUser(ctx context.Context, userId string) ([]Sess
 		return nil, nerror.New("has no sessions")
 	}
 
-	var sessions = make([]Session, 0, len(sessionDataList))
+	var sessions = make([]Zone, 0, len(sessionDataList))
 	for _, sessionData := range sessionDataList {
 		if len(sessionData) == 0 {
 			continue
@@ -254,7 +254,7 @@ func (s *SessionStore) GetAllForUser(ctx context.Context, userId string) ([]Sess
 	return sessions, nil
 }
 
-func (s *SessionStore) Has(ctx context.Context, sid string, userId string) (bool, error) {
+func (s *ZoneStore) Has(ctx context.Context, sid string, userId string) (bool, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -271,7 +271,7 @@ func (s *SessionStore) Has(ctx context.Context, sid string, userId string) (bool
 
 // GetByUser retrieves giving session from Store based on the provided
 // session user value.
-func (s *SessionStore) GetById(ctx context.Context, sid string, userId string) (*Session, error) {
+func (s *ZoneStore) GetById(ctx context.Context, sid string, userId string) (*Zone, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -284,7 +284,7 @@ func (s *SessionStore) GetById(ctx context.Context, sid string, userId string) (
 		return nil, nerror.WrapOnly(err)
 	}
 
-	var session *Session
+	var session *Zone
 	var reader = bytes.NewReader(sessionBytes)
 	if session, err = s.Codec.Decode(reader); err != nil {
 		return nil, nerror.WrapOnly(err)
@@ -293,7 +293,7 @@ func (s *SessionStore) GetById(ctx context.Context, sid string, userId string) (
 }
 
 // Remove removes underline session if still present from underline Store.
-func (s *SessionStore) Remove(ctx context.Context, sid string, userId string) (*Session, error) {
+func (s *ZoneStore) Remove(ctx context.Context, sid string, userId string) (*Zone, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -301,7 +301,7 @@ func (s *SessionStore) Remove(ctx context.Context, sid string, userId string) (*
 
 	var key = buildSessionKey(sid, userId)
 
-	var session *Session
+	var session *Zone
 	var sessionBytes, err = s.Store.Remove(key)
 	if err != nil {
 		return nil, nerror.WrapOnly(err)
@@ -314,7 +314,7 @@ func (s *SessionStore) Remove(ctx context.Context, sid string, userId string) (*
 	return session, nil
 }
 
-func (s *SessionStore) RemoveAllForUser(ctx context.Context, userId string) error {
+func (s *ZoneStore) RemoveAllForUser(ctx context.Context, userId string) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()

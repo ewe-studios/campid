@@ -71,7 +71,7 @@ type DataClaim struct {
 	RefreshId      nxid.ID
 	AccessId       nxid.ID
 	ParentAccessId nxid.ID
-	SessionId      string
+	ZoneId         string
 	UserId         string
 	RandomId       string
 	IsUsable       bool // indicates if userId and RandomId are supplied and valid for use.
@@ -113,13 +113,13 @@ func (d *DataClaim) Decode(encodedDataClaim string) error {
 
 	d.UserId = nunsafe.Bytes2String(decodedParts[1])
 	d.RandomId = nunsafe.Bytes2String(decodedParts[5])
-	d.SessionId = nunsafe.Bytes2String(decodedParts[6])
+	d.ZoneId = nunsafe.Bytes2String(decodedParts[6])
 	d.IsUsable = true
 	return nil
 }
 
 func (d DataClaim) Encode() string {
-	var token = strings.Join([]string{d.Id.String(), d.UserId, d.RefreshId.String(), d.AccessId.String(), d.ParentAccessId.String(), d.RandomId, d.SessionId}, dot)
+	var token = strings.Join([]string{d.Id.String(), d.UserId, d.RefreshId.String(), d.AccessId.String(), d.ParentAccessId.String(), d.RandomId, d.ZoneId}, dot)
 	return base64.RawStdEncoding.EncodeToString(nunsafe.String2Bytes(token))
 }
 
@@ -148,7 +148,7 @@ func (jm *JWTStore) CreateWithId(ctx context.Context, jwtId nxid.ID, sessionId s
 	c.Data = data
 	c.DataClaim.Id = jwtId
 	c.DataClaim.UserId = userId
-	c.DataClaim.SessionId = sessionId
+	c.DataClaim.ZoneId = sessionId
 	c.DataClaim.RefreshId = nxid.New()
 	c.DataClaim.AccessId = nxid.New()
 	c.DataClaim.ParentAccessId = parentAccessId
@@ -318,7 +318,7 @@ func (jm *JWTStore) VerifyAccess(ctx context.Context, accessToken string) (Claim
 		return c, nil, nerror.New("claims has no sessionId")
 	}
 
-	c.SessionId = sessionId
+	c.ZoneId = sessionId
 
 	var accessId, hasAccessId = mappedClaims[accessIdKey].(string)
 	if !hasAccessId {
@@ -480,9 +480,9 @@ func (jm *JWTStore) Refresh(ctx context.Context, refreshToken string) (Claim, er
 		return c, nerror.New("refresh value does not match expectation")
 	}
 
-	// Create new jwt claim
+	// CreateZone new jwt claim
 	var newClaimErr error
-	c, newClaimErr = jm.CreateWithId(ctx, c.Id, c.SessionId, c.UserId, c.AccessId, jwtDataMap)
+	c, newClaimErr = jm.CreateWithId(ctx, c.Id, c.ZoneId, c.UserId, c.AccessId, jwtDataMap)
 	if newClaimErr != nil {
 		return c, nerror.WrapOnly(newClaimErr)
 	}
@@ -564,7 +564,7 @@ func (jm *JWTStore) RemoveWithJwtIdAndSessionId(ctx context.Context, jwtId strin
 	return nil
 }
 
-// RemoveJWTId removes both the respective jwt id and associated refresh and access id's
+// RemoveJwtId removes both the respective jwt id and associated refresh and access id's
 // related to the jwt, there by rendering all user's jwt access for this invalid.
 //
 // Delete this, delete both access and refresh at once.
@@ -619,7 +619,7 @@ func (jm *JWTStore) RemoveRefreshId(ctx context.Context, refreshId string) (stri
 	return nunsafe.Bytes2String(refreshToken), nil
 }
 
-// RemoveAcessId removes a refreshId from store if it exists and return associated userId.
+// RemoveAccessId removes a refreshId from store if it exists and return associated userId.
 // Doing this makes a refreshId invalid and un-usable.
 func (jm *JWTStore) RemoveAccessId(ctx context.Context, accessId string) (string, error) {
 	var span openTracing.Span

@@ -34,7 +34,7 @@ func TestRbacGroup(t *testing.T) {
 
 	var ctx = context.Background()
 
-	t.Run("Add", func(t *testing.T) {
+	t.Run("add", func(t *testing.T) {
 		defer os.RemoveAll(t.Name())
 		os.RemoveAll(t.Name())
 		store.Clear()

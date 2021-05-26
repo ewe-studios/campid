@@ -108,17 +108,17 @@ func TestSessionManager(t *testing.T) {
 
 	defer clearAllStorage()
 
-	var sz, cm, dr, createErr = sessionManager.Create(ctx, myUserId, myMethod, myDevice, myjwtData, mySessionData)
+	var sz, cm, dr, createErr = sessionManager.CreateZoneWithJwtAndDevice(ctx, myUserId, myMethod, myDevice, myjwtData, mySessionData)
 	require.NoError(t, createErr)
 	require.NotNil(t, sz)
 	require.NotNil(t, cm)
 	require.NotNil(t, dr)
 
 	require.NotEmpty(t, sz.Id)
-	require.NotEmpty(t, cm.SessionId)
+	require.NotEmpty(t, cm.ZoneId)
 
-	require.Equal(t, sz.Id, cm.SessionId)
-	require.Equal(t, sz.Id, dr.SessionId)
+	require.Equal(t, sz.Id, cm.ZoneId)
+	require.Equal(t, sz.Id, dr.ZoneId)
 
 	var sz2, clm2, err = sessionManager.Refresh(ctx, sz.Id, sz.UserId, cm.RefreshToken)
 	require.NoError(t, err)
@@ -137,7 +137,7 @@ func TestSessionManager(t *testing.T) {
 	require.NotNil(t, sz3)
 	require.Equal(t, sz.Id, sz3.Id)
 
-	var sz4, err3 = sessionManager.Get(ctx, sz3.Id, sz3.UserId)
+	var sz4, err3 = sessionManager.Get(ctx, sz3.UserId)
 	require.NoError(t, err3)
 	require.NotNil(t, sz4)
 	require.Equal(t, sz.Id, sz4.Id)
@@ -190,7 +190,7 @@ func TestSessionManager(t *testing.T) {
 	require.NotNil(t, deviceFromStore)
 	require.False(t, deviceFromStore.IsEnabled)
 
-	var sameSession, newClaim, sameDevice, createNewErr = sessionManager.Create(ctx, myUserId, myMethod, myDevice, myjwtData, mySessionData)
+	var sameSession, newClaim, sameDevice, createNewErr = sessionManager.CreateZoneWithJwtAndDevice(ctx, myUserId, myMethod, myDevice, myjwtData, mySessionData)
 	require.NoError(t, createNewErr)
 	require.NotNil(t, sameSession)
 	require.NotNil(t, newClaim)
@@ -206,7 +206,7 @@ func TestSessionManager(t *testing.T) {
 	require.NoError(t, getSzAndDvErr2)
 	require.Len(t, deviceList, 1)
 
-	var sameSession2, newClaim2, newDevice, createNewErr2 = sessionManager.Create(ctx, myUserId, myMethod, myDevice2, myjwtData, mySessionData)
+	var sameSession2, newClaim2, newDevice, createNewErr2 = sessionManager.CreateZoneWithJwtAndDevice(ctx, myUserId, myMethod, myDevice2, myjwtData, mySessionData)
 	require.NoError(t, createNewErr2)
 	require.NotNil(t, sameSession2)
 	require.NotNil(t, newClaim2)
@@ -222,7 +222,7 @@ func TestSessionManager(t *testing.T) {
 	require.NoError(t, getSzAndDvErr3)
 	require.Len(t, deviceList3, 2)
 
-	var sz5, err4 = sessionManager.Remove(ctx, sz3.Id, sz3.UserId)
+	var sz5, err4 = sessionManager.DeleteAllForUser(ctx, sz3.Id, sz3.UserId)
 	require.NoError(t, err4)
 	require.NotNil(t, sz5)
 	require.Equal(t, sz.Id, sz5.Id)
