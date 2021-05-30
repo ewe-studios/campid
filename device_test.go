@@ -24,7 +24,7 @@ func TestDeviceStore(t *testing.T) {
 	var myDevice DeviceInfo
 	myDevice.FingerprintId = "10"
 	myDevice.UserId = "1110"
-	myDevice.SessionId = "23"
+	myDevice.ZoneId = "23"
 	myDevice.IP = net.IPv4('4', '1', '1', '1')
 	myDevice.Agent = &Agent{
 		Browser: "Firefox",
@@ -62,7 +62,7 @@ func TestDeviceStore(t *testing.T) {
 		var retrievedRecord, retreiveErr = deviceStore.GetDevice(ctx, createdRecord.Id)
 		require.NoError(t, retreiveErr)
 		require.Equal(t, createdRecord.Id, retrievedRecord.Id)
-		require.Equal(t, myDevice.SessionId, createdRecord.SessionId)
+		require.Equal(t, myDevice.ZoneId, createdRecord.ZoneId)
 	})
 	t.Run("Update", func(t *testing.T) {
 		defer os.RemoveAll(t.Name())
@@ -85,20 +85,20 @@ func TestDeviceStore(t *testing.T) {
 		var retrievedRecord, retreiveErr = deviceStore.GetDevice(ctx, createdRecord.Id)
 		require.NoError(t, retreiveErr)
 		require.Equal(t, createdRecord.Id, retrievedRecord.Id)
-		require.Equal(t, myDevice.SessionId, createdRecord.SessionId)
+		require.Equal(t, myDevice.ZoneId, createdRecord.ZoneId)
 
 		retrievedRecord.Location.State = "Ogun"
 		var updatedRecord, updateErr = deviceStore.Update(ctx, retrievedRecord)
 		require.NoError(t, updateErr)
 		require.NotNil(t, updatedRecord)
 		require.Equal(t, createdRecord.Id, updatedRecord.Id)
-		require.Equal(t, myDevice.SessionId, updatedRecord.SessionId)
+		require.Equal(t, myDevice.ZoneId, updatedRecord.ZoneId)
 		require.Equal(t, retrievedRecord.Location.State, updatedRecord.Location.State)
 
 		var retrievedRecord2, retreiveErr2 = deviceStore.GetDevice(ctx, createdRecord.Id)
 		require.NoError(t, retreiveErr2)
 		require.Equal(t, createdRecord.Id, retrievedRecord2.Id)
-		require.Equal(t, myDevice.SessionId, retrievedRecord2.SessionId)
+		require.Equal(t, myDevice.ZoneId, retrievedRecord2.ZoneId)
 		require.Equal(t, retrievedRecord.Location.State, retrievedRecord2.Location.State)
 	})
 	t.Run("GetAll", func(t *testing.T) {
@@ -168,9 +168,9 @@ func TestDeviceStore(t *testing.T) {
 		var retrievedRecord, retreiveErr = deviceStore.GetDevice(ctx, createdRecord.Id)
 		require.NoError(t, retreiveErr)
 		require.Equal(t, createdRecord.Id, retrievedRecord.Id)
-		require.Equal(t, myDevice.SessionId, createdRecord.SessionId)
+		require.Equal(t, myDevice.ZoneId, createdRecord.ZoneId)
 	})
-	t.Run("GetDeviceForSessionId", func(t *testing.T) {
+	t.Run("GetDeviceForZoneId", func(t *testing.T) {
 		defer os.RemoveAll(t.Name())
 		os.RemoveAll(t.Name())
 		store.Clear()
@@ -188,10 +188,10 @@ func TestDeviceStore(t *testing.T) {
 		require.NotNil(t, createdRecord)
 		require.NotEmpty(t, createdRecord.Id)
 
-		var retrievedRecord, retreiveErr = deviceStore.GetDeviceForSessionId(ctx, createdRecord.SessionId, createdRecord.Id)
+		var retrievedRecord, retreiveErr = deviceStore.GetDeviceForZoneId(ctx, createdRecord.ZoneId, createdRecord.Id)
 		require.NoError(t, retreiveErr)
 		require.Equal(t, createdRecord.Id, retrievedRecord.Id)
-		require.Equal(t, myDevice.SessionId, createdRecord.SessionId)
+		require.Equal(t, myDevice.ZoneId, createdRecord.ZoneId)
 	})
 	t.Run("HasIP", func(t *testing.T) {
 		defer os.RemoveAll(t.Name())
@@ -280,7 +280,7 @@ func TestDeviceStore(t *testing.T) {
 		var retrievedRecord, retreiveErr = deviceStore.GetDeviceWithIPAndCity(ctx, createdRecord.IP, createdRecord.Location.City, createdRecord.FingerprintId)
 		require.NoError(t, retreiveErr)
 		require.Equal(t, createdRecord.Id, retrievedRecord.Id)
-		require.Equal(t, myDevice.SessionId, createdRecord.SessionId)
+		require.Equal(t, myDevice.ZoneId, createdRecord.ZoneId)
 	})
 	t.Run("GetDeviceWithIPAndCity", func(t *testing.T) {
 		defer os.RemoveAll(t.Name())
@@ -303,7 +303,7 @@ func TestDeviceStore(t *testing.T) {
 		var retrievedRecord, retreiveErr = deviceStore.GetDeviceWithIPAndCity(ctx, createdRecord.IP, createdRecord.Location.City, "")
 		require.NoError(t, retreiveErr)
 		require.Equal(t, createdRecord.Id, retrievedRecord.Id)
-		require.Equal(t, myDevice.SessionId, createdRecord.SessionId)
+		require.Equal(t, myDevice.ZoneId, createdRecord.ZoneId)
 	})
 	t.Run("GetAllDevicesForUserId", func(t *testing.T) {
 		defer os.RemoveAll(t.Name())
@@ -349,7 +349,7 @@ func TestDeviceStore(t *testing.T) {
 		require.NoError(t, retreiveErr)
 		require.NotEmpty(t, records)
 	})
-	t.Run("GetAllDevicesForSessionId", func(t *testing.T) {
+	t.Run("GetAllDevicesForZoneId", func(t *testing.T) {
 		os.RemoveAll(t.Name())
 		defer os.RemoveAll(t.Name())
 		store.Clear()
@@ -367,11 +367,11 @@ func TestDeviceStore(t *testing.T) {
 		require.NotNil(t, createdRecord)
 		require.NotEmpty(t, createdRecord.Id)
 
-		var records, retreiveErr = deviceStore.GetAllDevicesForSessionId(ctx, createdRecord.SessionId)
+		var records, retreiveErr = deviceStore.GetAllDevicesForZoneId(ctx, createdRecord.ZoneId)
 		require.NoError(t, retreiveErr)
 		require.NotEmpty(t, records)
 	})
-	t.Run("RemoveAllDevicesForSessionId", func(t *testing.T) {
+	t.Run("RemoveAllDevicesForZoneId", func(t *testing.T) {
 		os.RemoveAll(t.Name())
 		defer os.RemoveAll(t.Name())
 		store.Clear()
@@ -392,12 +392,12 @@ func TestDeviceStore(t *testing.T) {
 		var retrievedRecord, retreiveErr = deviceStore.GetDevice(ctx, createdRecord.Id)
 		require.NoError(t, retreiveErr)
 		require.Equal(t, createdRecord.Id, retrievedRecord.Id)
-		require.Equal(t, myDevice.SessionId, createdRecord.SessionId)
+		require.Equal(t, myDevice.ZoneId, createdRecord.ZoneId)
 
-		var removeErr = deviceStore.RemoveAllDevicesForSessionId(ctx, createdRecord.SessionId)
+		var removeErr = deviceStore.RemoveAllDevicesForZoneId(ctx, createdRecord.ZoneId)
 		require.NoError(t, removeErr)
 
-		var records, retreiveErr2 = deviceStore.GetAllDevicesForSessionId(ctx, createdRecord.SessionId)
+		var records, retreiveErr2 = deviceStore.GetAllDevicesForZoneId(ctx, createdRecord.ZoneId)
 		require.Error(t, retreiveErr2)
 		require.Empty(t, records)
 	})

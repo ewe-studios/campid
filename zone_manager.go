@@ -204,7 +204,7 @@ func (s *UserZoneManager) DeleteAllDevices(
 		return nerror.New("no session for giving user with id").Add("zoneId", zoneId).Add("userId", userId)
 	}
 
-	if removedAllDeviceErr := s.DeviceStore.RemoveAllDevicesForSessionId(ctx, zoneId); removedAllDeviceErr != nil {
+	if removedAllDeviceErr := s.DeviceStore.RemoveAllDevicesForZoneId(ctx, zoneId); removedAllDeviceErr != nil {
 		return nerror.WrapOnly(removedAllDeviceErr)
 	}
 
@@ -230,7 +230,7 @@ func (s *UserZoneManager) DeleteJwtSessions(
 		return nerror.New("no session for giving user with id").Add("zoneId", zoneId).Add("userId", userId)
 	}
 
-	if removedAllJwtErr := s.JwtStore.RemoveAllSessionJwt(ctx, zoneId); removedAllJwtErr != nil {
+	if removedAllJwtErr := s.JwtStore.RemoveAllZoneJwt(ctx, zoneId); removedAllJwtErr != nil {
 		return nerror.WrapOnly(removedAllJwtErr)
 	}
 
@@ -256,11 +256,11 @@ func (s *UserZoneManager) DeleteAllForUser(
 		return nil, nerror.New("no session for giving user with id").Add("zoneId", zoneId).Add("userId", userId)
 	}
 
-	if removedAllDeviceErr := s.DeviceStore.RemoveAllDevicesForSessionId(ctx, zoneId); removedAllDeviceErr != nil {
+	if removedAllDeviceErr := s.DeviceStore.RemoveAllDevicesForZoneId(ctx, zoneId); removedAllDeviceErr != nil {
 		return nil, nerror.WrapOnly(removedAllDeviceErr)
 	}
 
-	if removedAllJwtErr := s.JwtStore.RemoveAllSessionJwt(ctx, zoneId); removedAllJwtErr != nil {
+	if removedAllJwtErr := s.JwtStore.RemoveAllZoneJwt(ctx, zoneId); removedAllJwtErr != nil {
 		return nil, nerror.WrapOnly(removedAllJwtErr)
 	}
 

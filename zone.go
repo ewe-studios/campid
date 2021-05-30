@@ -85,8 +85,8 @@ func (s *Zone) Validate() error {
 // ZoneCodec exposes an interface which combines the SessionEncoder and
 // SessionDecoder interfaces.
 type ZoneCodec interface {
-	Decode(r io.Reader) (*Zone, error)
-	Encode(w io.Writer, s *Zone) error
+	Decode(r io.Reader) (Zone, error)
+	Encode(w io.Writer, s Zone) error
 }
 
 // ZoneStore implements a storage type for CRUD operations on
@@ -125,7 +125,7 @@ func (s *ZoneStore) Save(ctx context.Context, se *Zone) error {
 	defer bufferPool.Put(content)
 	content.Reset()
 
-	if err := s.Codec.Encode(content, se); err != nil {
+	if err := s.Codec.Encode(content, *se); err != nil {
 		return nerror.Wrap(err, "Failed to encode data")
 	}
 
@@ -155,7 +155,7 @@ func (s *ZoneStore) Update(ctx context.Context, se *Zone) error {
 	defer bufferPool.Put(content)
 	content.Reset()
 
-	if err := s.Codec.Encode(content, se); err != nil {
+	if err := s.Codec.Encode(content, *se); err != nil {
 		return nerror.Wrap(err, "Failed to encode data")
 	}
 
@@ -180,7 +180,7 @@ func (s *ZoneStore) GetAll(ctx context.Context) ([]Zone, error) {
 		if decodeErr != nil {
 			return nerror.WrapOnly(decodeErr)
 		}
-		sessions = append(sessions, *session)
+		sessions = append(sessions, session)
 		return nil
 	})
 	if err != nil {
@@ -215,7 +215,7 @@ func (s *ZoneStore) GetOneForUser(ctx context.Context, userId string) (*Zone, er
 	if decodeErr != nil {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
-	return session, nil
+	return &session, nil
 }
 
 // GetAllForUser will return a list of all found sessions data from the underline datastore.
@@ -249,7 +249,7 @@ func (s *ZoneStore) GetAllForUser(ctx context.Context, userId string) ([]Zone, e
 		if decodeErr != nil {
 			return nil, nerror.WrapOnly(decodeErr)
 		}
-		sessions = append(sessions, *session)
+		sessions = append(sessions, session)
 	}
 	return sessions, nil
 }
@@ -269,7 +269,7 @@ func (s *ZoneStore) Has(ctx context.Context, sid string, userId string) (bool, e
 	return hasSession, nil
 }
 
-// GetByUser retrieves giving session from Store based on the provided
+// GetById retrieves giving session from Store based on the provided
 // session user value.
 func (s *ZoneStore) GetById(ctx context.Context, sid string, userId string) (*Zone, error) {
 	var span openTracing.Span
@@ -284,12 +284,12 @@ func (s *ZoneStore) GetById(ctx context.Context, sid string, userId string) (*Zo
 		return nil, nerror.WrapOnly(err)
 	}
 
-	var session *Zone
+	var session Zone
 	var reader = bytes.NewReader(sessionBytes)
 	if session, err = s.Codec.Decode(reader); err != nil {
 		return nil, nerror.WrapOnly(err)
 	}
-	return session, nil
+	return &session, nil
 }
 
 // Remove removes underline session if still present from underline Store.
@@ -301,7 +301,7 @@ func (s *ZoneStore) Remove(ctx context.Context, sid string, userId string) (*Zon
 
 	var key = buildSessionKey(sid, userId)
 
-	var session *Zone
+	var session Zone
 	var sessionBytes, err = s.Store.Remove(key)
 	if err != nil {
 		return nil, nerror.WrapOnly(err)
@@ -311,7 +311,7 @@ func (s *ZoneStore) Remove(ctx context.Context, sid string, userId string) (*Zon
 	if session, err = s.Codec.Decode(reader); err != nil {
 		return nil, nerror.WrapOnly(err)
 	}
-	return session, nil
+	return &session, nil
 }
 
 func (s *ZoneStore) RemoveAllForUser(ctx context.Context, userId string) error {

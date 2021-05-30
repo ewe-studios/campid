@@ -222,25 +222,24 @@ func (ds *DeviceStore) Create(
 	return &d, nil
 }
 
-// RemoveAllDevicesForSessiond returns found device matching ip and city, and if provided, fingerprintId.
-func (ds *DeviceStore) RemoveAllDevicesForSessionId(ctx context.Context, sessionId string) error {
+func (ds *DeviceStore) RemoveAllDevicesForZoneId(ctx context.Context, zoneId string) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
 	}
 
-	if len(sessionId) == 0 {
+	if len(zoneId) == 0 {
 		return nerror.New("neither value can be empty").
-			Add("sessionId", sessionId)
+			Add("zoneId", zoneId)
 	}
 
-	var userQuery = query.NewMatchQuery("ZoneId: " + sessionId)
+	var userQuery = query.NewMatchQuery("ZoneId: " + zoneId)
 	var req = bleve.NewSearchRequest(userQuery)
 
 	var searchResult, searchErr = ds.Indexer.Search(req)
 	if searchErr != nil {
 		return nerror.Wrap(searchErr, "searching for ip").
-			Add("sessionId", sessionId)
+			Add("zoneId", zoneId)
 	}
 
 	if searchResult.Total == 0 {
@@ -266,8 +265,8 @@ func (ds *DeviceStore) RemoveAllDevicesForSessionId(ctx context.Context, session
 	return nil
 }
 
-// GetDeviceForSessionId returns found device matching ip and city, and if provided, fingerprintId.
-func (ds *DeviceStore) GetDeviceForSessionId(ctx context.Context, sessionId string, deviceId string) (*Device, error) {
+// GetDeviceForZoneId returns found device matching zoneId and deviceId.
+func (ds *DeviceStore) GetDeviceForZoneId(ctx context.Context, zoneId string, deviceId string) (*Device, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -275,11 +274,11 @@ func (ds *DeviceStore) GetDeviceForSessionId(ctx context.Context, sessionId stri
 
 	if len(deviceId) == 0 {
 		return nil, nerror.New("neither value can be empty").
-			Add("deviceId", deviceId).Add("sessionId", sessionId)
+			Add("deviceId", deviceId).Add("zoneId", zoneId)
 	}
 
 	var idQuery = query.NewMatchQuery("Id: " + deviceId)
-	var sessionQuery = query.NewMatchQuery("ZoneId: " + sessionId)
+	var sessionQuery = query.NewMatchQuery("ZoneId: " + zoneId)
 
 	var queryList = []query.Query{sessionQuery, idQuery}
 	var searchQuery = query.NewConjunctionQuery(queryList)
@@ -288,7 +287,7 @@ func (ds *DeviceStore) GetDeviceForSessionId(ctx context.Context, sessionId stri
 	var searchResult, searchErr = ds.Indexer.Search(req)
 	if searchErr != nil {
 		return nil, nerror.Wrap(searchErr, "searching for id").
-			Add("deviceId", deviceId).Add("sessionId", sessionId)
+			Add("deviceId", deviceId).Add("zoneId", zoneId)
 	}
 
 	if searchResult.Total == 0 {
@@ -304,7 +303,7 @@ func (ds *DeviceStore) GetDeviceForSessionId(ctx context.Context, sessionId stri
 	var decodedDevice, decodeErr = ds.Codec.Decode(bytes.NewReader(deviceData))
 	if decodeErr != nil {
 		return nil, nerror.WrapOnly(decodeErr).
-			Add("deviceId", deviceId).Add("sessionId", sessionId)
+			Add("deviceId", deviceId).Add("zoneId", zoneId)
 	}
 
 	return &decodedDevice, nil
@@ -416,25 +415,25 @@ func (ds *DeviceStore) GetAll(ctx context.Context) ([]Device, error) {
 	return devices, nil
 }
 
-// GetAllDevicesForSessiond returns found device matching ip and city, and if provided, fingerprintId.
-func (ds *DeviceStore) GetAllDevicesForSessionId(ctx context.Context, sessionId string) ([]Device, error) {
+// GetAllDevicesForZoneId returns found device matching ip and city, and if provided, fingerprintId.
+func (ds *DeviceStore) GetAllDevicesForZoneId(ctx context.Context, zoneId string) ([]Device, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
 	}
 
-	if len(sessionId) == 0 {
+	if len(zoneId) == 0 {
 		return nil, nerror.New("neither value can be empty").
-			Add("sessionId", sessionId)
+			Add("zoneId", zoneId)
 	}
 
-	var userQuery = query.NewMatchQuery("ZoneId: " + sessionId)
+	var userQuery = query.NewMatchQuery("ZoneId: " + zoneId)
 	var req = bleve.NewSearchRequest(userQuery)
 
 	var searchResult, searchErr = ds.Indexer.Search(req)
 	if searchErr != nil {
 		return nil, nerror.Wrap(searchErr, "searching for ip").
-			Add("sessionId", sessionId)
+			Add("zoneId", zoneId)
 	}
 
 	if searchResult.Total == 0 {
@@ -445,12 +444,12 @@ func (ds *DeviceStore) GetAllDevicesForSessionId(ctx context.Context, sessionId 
 	for index, matcher := range searchResult.Hits {
 		var deviceData, getErr = ds.Store.Get(matcher.ID)
 		if getErr != nil {
-			return nil, nerror.WrapOnly(getErr).Add("sessionId", sessionId)
+			return nil, nerror.WrapOnly(getErr).Add("zoneId", zoneId)
 		}
 
 		var decodedDevice, decodeErr = ds.Codec.Decode(bytes.NewReader(deviceData))
 		if decodeErr != nil {
-			return nil, nerror.WrapOnly(decodeErr).Add("sessionId", sessionId)
+			return nil, nerror.WrapOnly(decodeErr).Add("zoneId", zoneId)
 		}
 
 		devices[index] = decodedDevice

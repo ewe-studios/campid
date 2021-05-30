@@ -1,76 +1,73 @@
 package campid
 
 import (
-	"encoding/gob"
-	"encoding/json"
 	"io"
 
 	"github.com/influx6/npkg/nerror"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 // MsgPackUserCodec implements the UserCodec interface for using
 // the MsgPack Codec.
-type MsgPackUserCodec struct{}
+type MsgPackUserCodec struct {
+	Codec MsgPackCodec
+}
 
 // Encode encodes giving session using the internal MsgPack format.
 // Returning provided data.
-func (gb *MsgPackUserCodec) Encode(w io.Writer, s *User) error {
-	if err := msgpack.NewEncoder(w).Encode(s); err != nil {
-		return nerror.Wrap(err, "Failed to encode giving session")
-	}
-	return nil
+func (gb *MsgPackUserCodec) Encode(w io.Writer, s User) error {
+	return gb.Codec.Encode(w, s)
 }
 
 // Decode decodes giving data into provided session instance.
-func (gb *MsgPackUserCodec) Decode(r io.Reader) (*User, error) {
+func (gb *MsgPackUserCodec) Decode(r io.Reader) (User, error) {
 	var s User
-	if err := msgpack.NewDecoder(r).Decode(&s); err != nil {
-		return nil, nerror.WrapOnly(err)
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
+		return s, nerror.WrapOnly(err)
 	}
-	return &s, nil
+	return s, nil
 }
 
 // JsonUserCodec implements the UserCodec interface for using
 // the Json Codec.
-type JsonUserCodec struct{}
+type JsonUserCodec struct {
+	Codec JsonCodec
+}
 
 // Encode encodes giving session using the internal Json format.
 // Returning provided data.
-func (gb *JsonUserCodec) Encode(w io.Writer, s *User) error {
-	if err := json.NewEncoder(w).Encode(s); err != nil {
-		return nerror.Wrap(err, "Failed to encode giving session")
-	}
-	return nil
+func (gb *JsonUserCodec) Encode(w io.Writer, s User) error {
+	return gb.Codec.Encode(w, s)
 }
 
 // Decode decodes giving data into provided session instance.
-func (gb *JsonUserCodec) Decode(r io.Reader) (*User, error) {
+func (gb *JsonUserCodec) Decode(r io.Reader) (User, error) {
 	var s User
-	if err := json.NewDecoder(r).Decode(&s); err != nil {
-		return nil, nerror.WrapOnly(err)
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
+		return s, nerror.WrapOnly(err)
 	}
-	return &s, nil
+	return s, nil
 }
 
 // GobUserCodec implements the UserCodec interface for using
 // the gob Codec.
-type GobUserCodec struct{}
+type GobUserCodec struct {
+	Codec GobCodec
+}
 
 // Encode encodes giving session using the internal gob format.
 // Returning provided data.
-func (gb *GobUserCodec) Encode(w io.Writer, s *User) error {
-	if err := gob.NewEncoder(w).Encode(s); err != nil {
-		return nerror.Wrap(err, "Failed to encode giving session")
-	}
-	return nil
+func (gb *GobUserCodec) Encode(w io.Writer, s User) error {
+	return gb.Codec.Encode(w, s)
 }
 
 // Decode decodes giving data into provided session instance.
-func (gb *GobUserCodec) Decode(r io.Reader) (*User, error) {
+func (gb *GobUserCodec) Decode(r io.Reader) (User, error) {
 	var s User
-	if err := gob.NewDecoder(r).Decode(&s); err != nil {
-		return nil, nerror.WrapOnly(err)
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
+		return s, nerror.WrapOnly(err)
 	}
-	return &s, nil
+	return s, nil
 }

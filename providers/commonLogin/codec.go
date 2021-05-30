@@ -1,31 +1,96 @@
 package commonLogin
 
 import (
-	"encoding/gob"
-	"encoding/json"
 	"io"
 
+	"github.com/ewe-studios/campid"
+
 	"github.com/influx6/npkg/nerror"
-	"github.com/vmihailenco/msgpack/v5"
 )
+
+// MsgPackRegisteredUserCodec implements the RegisteredUserCodec interface for using
+// the MsgPack RegisteredUserCodec.
+type MsgPackRegisteredUserCodec struct {
+	Codec campid.MsgPackCodec
+}
+
+// Encode encodes giving session using the internal MsgPack format.
+// Returning provided data.
+func (gb *MsgPackRegisteredUserCodec) Encode(w io.Writer, s RegisteredUser) error {
+	return gb.Codec.Encode(w, s)
+}
+
+// Decode decodes giving data into provided session instance.
+func (gb *MsgPackRegisteredUserCodec) Decode(r io.Reader) (RegisteredUser, error) {
+	var s RegisteredUser
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
+		return s, nerror.WrapOnly(err)
+	}
+	return s, nil
+}
+
+// JsonRegisteredUserCodec implements the RegisteredUserCodec interface for using
+// the Json RegisteredUserCodec.
+type JsonRegisteredUserCodec struct {
+	Codec campid.JsonCodec
+}
+
+// Encode encodes giving session using the internal Json format.
+// Returning provided data.
+func (gb *JsonRegisteredUserCodec) Encode(w io.Writer, s RegisteredUser) error {
+	return gb.Codec.Encode(w, s)
+}
+
+// Decode decodes giving data into provided session instance.
+func (gb *JsonRegisteredUserCodec) Decode(r io.Reader) (RegisteredUser, error) {
+	var s RegisteredUser
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
+		return s, nerror.WrapOnly(err)
+	}
+	return s, nil
+}
+
+// GobRegisteredUserCodec implements the RegisteredUserCodec interface for using
+// the gob RegisteredUserCodec.
+type GobRegisteredUserCodec struct {
+	Codec campid.GobCodec
+}
+
+// Encode encodes giving session using the internal gob format.
+// Returning provided data.
+func (gb *GobRegisteredUserCodec) Encode(w io.Writer, s RegisteredUser) error {
+	return gb.Codec.Encode(w, s)
+}
+
+// Decode decodes giving data into provided session instance.
+func (gb *GobRegisteredUserCodec) Decode(r io.Reader) (RegisteredUser, error) {
+	var s RegisteredUser
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
+		return s, nerror.WrapOnly(err)
+	}
+	return s, nil
+}
 
 // MsgPackEmailLoginCodec implements the LoginCodec interface for using
 // the MsgPack LoginCodec.
-type MsgPackEmailLoginCodec struct{}
+type MsgPackEmailLoginCodec struct {
+	Codec campid.MsgPackCodec
+}
 
 // Encode encodes giving session using the internal MsgPack format.
 // Returning provided data.
 func (gb *MsgPackEmailLoginCodec) Encode(w io.Writer, s Login) error {
-	if err := msgpack.NewEncoder(w).Encode(s); err != nil {
-		return nerror.Wrap(err, "Failed to encode giving session")
-	}
-	return nil
+	return gb.Codec.Encode(w, s)
 }
 
 // Decode decodes giving data into provided session instance.
 func (gb *MsgPackEmailLoginCodec) Decode(r io.Reader) (Login, error) {
 	var s Login
-	if err := msgpack.NewDecoder(r).Decode(&s); err != nil {
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
 		return s, nerror.WrapOnly(err)
 	}
 	return s, nil
@@ -33,21 +98,21 @@ func (gb *MsgPackEmailLoginCodec) Decode(r io.Reader) (Login, error) {
 
 // JsonEmailLoginCodec implements the LoginCodec interface for using
 // the Json LoginCodec.
-type JsonEmailLoginCodec struct{}
+type JsonEmailLoginCodec struct {
+	Codec campid.JsonCodec
+}
 
 // Encode encodes giving session using the internal Json format.
 // Returning provided data.
 func (gb *JsonEmailLoginCodec) Encode(w io.Writer, s Login) error {
-	if err := json.NewEncoder(w).Encode(s); err != nil {
-		return nerror.Wrap(err, "Failed to encode giving session")
-	}
-	return nil
+	return gb.Codec.Encode(w, s)
 }
 
 // Decode decodes giving data into provided session instance.
 func (gb *JsonEmailLoginCodec) Decode(r io.Reader) (Login, error) {
 	var s Login
-	if err := json.NewDecoder(r).Decode(&s); err != nil {
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
 		return s, nerror.WrapOnly(err)
 	}
 	return s, nil
@@ -55,21 +120,21 @@ func (gb *JsonEmailLoginCodec) Decode(r io.Reader) (Login, error) {
 
 // GobEmailLoginCodec implements the LoginCodec interface for using
 // the gob LoginCodec.
-type GobEmailLoginCodec struct{}
+type GobEmailLoginCodec struct {
+	Codec campid.GobCodec
+}
 
 // Encode encodes giving session using the internal gob format.
 // Returning provided data.
 func (gb *GobEmailLoginCodec) Encode(w io.Writer, s Login) error {
-	if err := gob.NewEncoder(w).Encode(s); err != nil {
-		return nerror.Wrap(err, "Failed to encode giving session")
-	}
-	return nil
+	return gb.Codec.Encode(w, s)
 }
 
 // Decode decodes giving data into provided session instance.
 func (gb *GobEmailLoginCodec) Decode(r io.Reader) (Login, error) {
 	var s Login
-	if err := gob.NewDecoder(r).Decode(&s); err != nil {
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
 		return s, nerror.WrapOnly(err)
 	}
 	return s, nil
@@ -77,21 +142,21 @@ func (gb *GobEmailLoginCodec) Decode(r io.Reader) (Login, error) {
 
 // MsgPackRefreshLoginCodec implements the LoginCodec interface for using
 // the MsgPack LoginCodec.
-type MsgPackRefreshLoginCodec struct{}
+type MsgPackRefreshLoginCodec struct {
+	Codec campid.MsgPackCodec
+}
 
 // Encode encodes giving session using the internal MsgPack format.
 // Returning provided data.
-func (gb *MsgPackRefreshLoginCodec) Encode(w io.Writer, s RefreshLogin) error {
-	if err := msgpack.NewEncoder(w).Encode(s); err != nil {
-		return nerror.Wrap(err, "Failed to encode giving session")
-	}
-	return nil
+func (gb *MsgPackRefreshLoginCodec) Encode(w io.Writer, s RefreshUserAccess) error {
+	return gb.Codec.Encode(w, s)
 }
 
 // Decode decodes giving data into provided session instance.
-func (gb *MsgPackRefreshLoginCodec) Decode(r io.Reader) (RefreshLogin, error) {
-	var s RefreshLogin
-	if err := msgpack.NewDecoder(r).Decode(&s); err != nil {
+func (gb *MsgPackRefreshLoginCodec) Decode(r io.Reader) (RefreshUserAccess, error) {
+	var s RefreshUserAccess
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
 		return s, nerror.WrapOnly(err)
 	}
 	return s, nil
@@ -99,21 +164,21 @@ func (gb *MsgPackRefreshLoginCodec) Decode(r io.Reader) (RefreshLogin, error) {
 
 // JsonRefreshLoginCodec implements the LoginCodec interface for using
 // the Json LoginCodec.
-type JsonRefreshLoginCodec struct{}
+type JsonRefreshLoginCodec struct {
+	Codec campid.JsonCodec
+}
 
 // Encode encodes giving session using the internal Json format.
 // Returning provided data.
-func (gb *JsonRefreshLoginCodec) Encode(w io.Writer, s RefreshLogin) error {
-	if err := json.NewEncoder(w).Encode(s); err != nil {
-		return nerror.Wrap(err, "Failed to encode giving session")
-	}
-	return nil
+func (gb *JsonRefreshLoginCodec) Encode(w io.Writer, s RefreshUserAccess) error {
+	return gb.Codec.Encode(w, s)
 }
 
 // Decode decodes giving data into provided session instance.
-func (gb *JsonRefreshLoginCodec) Decode(r io.Reader) (RefreshLogin, error) {
-	var s RefreshLogin
-	if err := json.NewDecoder(r).Decode(&s); err != nil {
+func (gb *JsonRefreshLoginCodec) Decode(r io.Reader) (RefreshUserAccess, error) {
+	var s RefreshUserAccess
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
 		return s, nerror.WrapOnly(err)
 	}
 	return s, nil
@@ -121,21 +186,21 @@ func (gb *JsonRefreshLoginCodec) Decode(r io.Reader) (RefreshLogin, error) {
 
 // GobRefreshLoginCodec implements the LoginCodec interface for using
 // the gob LoginCodec.
-type GobRefreshLoginCodec struct{}
+type GobRefreshLoginCodec struct {
+	Codec campid.GobCodec
+}
 
 // Encode encodes giving session using the internal gob format.
 // Returning provided data.
-func (gb *GobRefreshLoginCodec) Encode(w io.Writer, s RefreshLogin) error {
-	if err := gob.NewEncoder(w).Encode(s); err != nil {
-		return nerror.Wrap(err, "Failed to encode giving session")
-	}
-	return nil
+func (gb *GobRefreshLoginCodec) Encode(w io.Writer, s RefreshUserAccess) error {
+	return gb.Codec.Encode(w, s)
 }
 
 // Decode decodes giving data into provided session instance.
-func (gb *GobRefreshLoginCodec) Decode(r io.Reader) (RefreshLogin, error) {
-	var s RefreshLogin
-	if err := gob.NewDecoder(r).Decode(&s); err != nil {
+func (gb *GobRefreshLoginCodec) Decode(r io.Reader) (RefreshUserAccess, error) {
+	var s RefreshUserAccess
+	var err = gb.Codec.Decode(r, &s)
+	if err != nil {
 		return s, nerror.WrapOnly(err)
 	}
 	return s, nil

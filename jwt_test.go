@@ -267,7 +267,7 @@ func TestJwtManufacturer(t *testing.T) {
 		require.NoError(t, getErr)
 	})
 
-	t.Run("RemoveWithJwtIdAndSessionId", func(t *testing.T) {
+	t.Run("RemoveWithJwtIdAndZoneId", func(t *testing.T) {
 		store.Clear()
 
 		var claim, err = manager.Create(ctx, mySessionId, myUser, nil)
@@ -279,7 +279,7 @@ func TestJwtManufacturer(t *testing.T) {
 		require.NotEmpty(t, claim.AccessId)
 		require.Equal(t, myUser, claim.UserId)
 
-		var getErr = manager.RemoveWithJwtIdAndSessionId(ctx, claim.Id.String(), mySessionId)
+		var getErr = manager.RemoveWithJwtIdAndZoneId(ctx, claim.Id.String(), mySessionId)
 		require.NoError(t, getErr)
 	})
 

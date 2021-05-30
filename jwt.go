@@ -260,6 +260,133 @@ func (jm *JWTStore) CreateWithId(ctx context.Context, jwtId nxid.ID, sessionId s
 	return c, nil
 }
 
+// AccessTokenToClaim verifies provided accessToken returning claim extracted from the valid jwt signed
+// token.
+func (jm *JWTStore) AccessTokenToClaim(ctx context.Context, accessToken string) (Claim, *jwt.Token, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var c Claim
+
+	var token, mappedClaims, tokenErr = jm.GetToken(ctx, accessToken)
+	if tokenErr != nil {
+		return c, nil, nerror.WrapOnly(tokenErr)
+	}
+
+	var parentAccessId, hasParentAccessId = mappedClaims[parentAccessIdKey].(string)
+	if hasParentAccessId {
+		var parentAccessXid, accessXidErr = nxid.FromString(parentAccessId)
+		if accessXidErr != nil {
+			return c, nil, nerror.WrapOnly(accessXidErr)
+		}
+
+		c.ParentAccessId = parentAccessXid
+	}
+
+	if encodedDataMapString, hasEncodedDataMap := mappedClaims[dataKey].(string); hasEncodedDataMap && len(encodedDataMapString) != 0 {
+		var encodedB64String, encodedB64Err = base64.RawStdEncoding.DecodeString(encodedDataMapString)
+		if encodedB64Err != nil {
+			return c, nil, nerror.WrapOnly(encodedB64Err)
+		}
+
+		var mapDataReader = bytes.NewBuffer(encodedB64String)
+		var decodedMap, decodedMapErr = jm.MapCodec.Decode(mapDataReader)
+		if decodedMapErr != nil {
+			return c, nil, nerror.WrapOnly(decodedMapErr)
+		}
+
+		c.Data = decodedMap
+	}
+
+	var sessionId, hasSessionId = mappedClaims[sessionIdKey].(string)
+	if !hasSessionId {
+		return c, nil, nerror.New("claims has no sessionId")
+	}
+
+	c.ZoneId = sessionId
+
+	var accessId, hasAccessId = mappedClaims[accessIdKey].(string)
+	if !hasAccessId {
+		return c, nil, nerror.New("claims has no accessId")
+	}
+
+	var accessXid, accessXidErr = nxid.FromString(accessId)
+	if accessXidErr != nil {
+		return c, nil, nerror.WrapOnly(accessXidErr)
+	}
+
+	c.AccessId = accessXid
+
+	var accessKey = jm.formatAccessId(accessId)
+
+	// if we are able to get refresh key then it's not expired.
+	var userIdBytes, getUserIdErr = jm.Store.Get(accessKey)
+	if getUserIdErr != nil {
+		return c, nil, nerror.WrapOnly(getUserIdErr)
+	}
+
+	var userId = nunsafe.Bytes2String(userIdBytes)
+
+	var refreshId, hasRefreshId = mappedClaims[refreshIdKey].(string)
+	if !hasRefreshId {
+		return c, nil, nerror.New("claims has no rid key")
+	}
+
+	var dataClaimRefreshId, dataClaimRefreshIdErr = nxid.FromString(refreshId)
+	if dataClaimRefreshIdErr != nil {
+		return c, nil, nerror.WrapOnly(dataClaimRefreshIdErr)
+	}
+
+	var jwtIdFromClaim, hasJwtId = mappedClaims[jwtIdKey].(string)
+	if !hasJwtId {
+		return c, nil, nerror.New("claims has no jwt id")
+	}
+
+	var dataClaimId, dataClaimIdErr = nxid.FromString(jwtIdFromClaim)
+	if dataClaimIdErr != nil {
+		return c, nil, nerror.WrapOnly(dataClaimRefreshIdErr)
+	}
+
+	var userIdFromClaim, hasUserId = mappedClaims["aud"].(string)
+	if !hasUserId {
+		return c, nil, nerror.New("claims has no audience")
+	}
+
+	if userIdFromClaim != userId {
+		return c, nil, nerror.New("claims userId is not valid")
+	}
+
+	var jwtIssuer, hasJwtIssuer = mappedClaims["iss"].(string)
+	if !hasJwtIssuer {
+		return c, nil, nerror.New("claims has no issuer")
+	}
+
+	if jwtIssuer != jm.Issuer {
+		return c, nil, nerror.New("claims issuer is not valid")
+	}
+
+	var expirationTime, hasExpirationTime = mappedClaims["exp"].(int64)
+	if !hasExpirationTime {
+		if floatExpr, hasFloatExpr := mappedClaims["exp"].(float64); hasFloatExpr {
+			hasExpirationTime = true
+			expirationTime = int64(floatExpr)
+		}
+	}
+	if !hasExpirationTime {
+		return c, nil, nerror.New("claims has no expiration time, this cant be from us")
+	}
+
+	c.UserId = userId
+	c.Id = dataClaimId
+	c.AccessToken = accessToken
+	c.AccessExpires = expirationTime
+	c.RefreshId = dataClaimRefreshId
+
+	return c, token, nil
+}
+
 // VerifyAccess verifies provided accessToken returning claim extracted from the valid jwt signed
 // token.
 func (jm *JWTStore) VerifyAccess(ctx context.Context, accessToken string) (Claim, *jwt.Token, error) {
@@ -528,11 +655,11 @@ func (jm *JWTStore) GetToken(ctx context.Context, token string) (*jwt.Token, jwt
 	return parsedClaim, mappedClaim, nil
 }
 
-// RemoveWithJwtIdAndSessionId removes both the respective jwt id and associated refresh and access id's
+// RemoveWithJwtIdAndZoneId removes both the respective jwt id and associated refresh and access id's
 // related to the jwt, there by rendering all user's jwt access for this invalid.
 //
 // Delete this, delete both access and refresh at once.
-func (jm *JWTStore) RemoveWithJwtIdAndSessionId(ctx context.Context, jwtId string, sessionId string) error {
+func (jm *JWTStore) RemoveWithJwtIdAndZoneId(ctx context.Context, jwtId string, zoneId string) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -555,7 +682,7 @@ func (jm *JWTStore) RemoveWithJwtIdAndSessionId(ctx context.Context, jwtId strin
 
 	var refreshKey = jm.formatRefreshId(refreshId)
 	var accessKey = jm.formatAccessId(accessId)
-	var sessionKey = jm.formatSessionJwtId(jwtId, sessionId)
+	var sessionKey = jm.formatSessionJwtId(jwtId, zoneId)
 
 	if formatErr := jm.Store.RemoveKeys(refreshKey, accessKey, sessionKey, key); formatErr != nil {
 		return nerror.WrapOnly(formatErr)
@@ -619,8 +746,8 @@ func (jm *JWTStore) RemoveRefreshId(ctx context.Context, refreshId string) (stri
 	return nunsafe.Bytes2String(refreshToken), nil
 }
 
-// RemoveAccessId removes a refreshId from store if it exists and return associated userId.
-// Doing this makes a refreshId invalid and un-usable.
+// RemoveAccessId removes a accessId from store if it exists and return associated userId.
+// Doing this makes a accessId invalid and un-usable.
 func (jm *JWTStore) RemoveAccessId(ctx context.Context, accessId string) (string, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
@@ -733,7 +860,7 @@ func (jm *JWTStore) GetUserIdByAccessId(ctx context.Context, accessId string) (s
 	return nunsafe.Bytes2String(userIdBytes), nil
 }
 
-func (jm *JWTStore) RemoveAllSessionJwt(ctx context.Context, sessionId string) error {
+func (jm *JWTStore) RemoveAllZoneJwt(ctx context.Context, sessionId string) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()

@@ -1,11 +1,26 @@
 package campid
 
 import (
+	"bytes"
 	"strings"
 
 	"github.com/ewe-studios/sabuhp"
 	"github.com/influx6/npkg/nerror"
 )
+
+func CopyBytes(b []byte) []byte {
+	var m = make([]byte, len(b))
+	copy(m, b)
+	return m
+}
+
+func CopyBufferBytes(b *bytes.Buffer) []byte {
+	return CopyBytes(b.Bytes())
+}
+
+func CopyValueBufferBytes(b bytes.Buffer) []byte {
+	return CopyBytes(b.Bytes())
+}
 
 func WriteDeviceToMessage(msg *sabuhp.Message, d Device) {
 	var deviceData = strings.Join([]string{

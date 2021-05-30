@@ -3,8 +3,9 @@ package commonLogin
 import (
 	"bytes"
 	"context"
-	"io"
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/ewe-studios/campid"
 	"github.com/ewe-studios/sabuhp"
@@ -42,15 +43,8 @@ func (el Login) Validate() error {
 	return nil
 }
 
-type LoginCodec interface {
-	Decode(r io.Reader) (Login, error)
-	Encode(w io.Writer, s Login) error
-}
-
 type Auth struct {
-	LoginCodec     LoginCodec
-	UserCodec      campid.UserCodec
-	NewUserCodec   campid.NewUserCodec
+	Codec          campid.Codec
 	PhoneValidator campid.PhoneValidator
 	EmailValidator campid.EmailValidator
 	Passwords      *campid.Password
@@ -58,9 +52,15 @@ type Auth struct {
 	Zones          *campid.UserZoneManager
 }
 
+type RegisteredUser struct {
+	User      campid.User
+	When      time.Time
+	FromTopic string
+}
+
 func (em *Auth) Register(
 	ctx context.Context,
-	msg *sabuhp.Message,
+	msg sabuhp.Message,
 	tr sabuhp.Transport,
 ) sabuhp.MessageErr {
 	var span openTracing.Span
@@ -68,7 +68,8 @@ func (em *Auth) Register(
 		defer span.Finish()
 	}
 
-	var newUser, decodeErr = em.NewUserCodec.Decode(bytes.NewReader(msg.Bytes))
+	var newUser campid.NewUser
+	var decodeErr = em.Codec.Decode(bytes.NewReader(msg.Bytes), &newUser)
 	if decodeErr != nil {
 		return sabuhp.WrapErr(nerror.WrapOnly(decodeErr), false)
 	}
@@ -83,18 +84,20 @@ func (em *Auth) Register(
 	defer bufferPool.Put(&encodedUserDataWriter)
 	encodedUserDataWriter.Reset()
 
-	if encodedErr := em.UserCodec.Encode(encodedUserDataWriter, &userObjectForPublic); encodedErr != nil {
+	var registeredUser RegisteredUser
+	registeredUser.User = userObjectForPublic
+	registeredUser.FromTopic = msg.Topic
+	registeredUser.When = time.Now()
+
+	if encodedErr := em.Codec.Encode(encodedUserDataWriter, registeredUser); encodedErr != nil {
 		return sabuhp.WrapErr(nerror.WrapOnly(encodedErr), false)
 	}
 
-	var encodedDataBytes = make([]byte, encodedUserDataWriter.Len())
-	_ = copy(encodedDataBytes, encodedUserDataWriter.Bytes()[:encodedUserDataWriter.Len()])
-
-	var newCraftedReply = msg.ReplyTo()
-	newCraftedReply.Bytes = encodedDataBytes
-
-
-	return tr.
+	var newCraftedReply = msg.ReplyWithTopic(campid.RegisteredUserTopic)
+	newCraftedReply.Bytes = campid.CopyBufferBytes(encodedUserDataWriter)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+	return nil
 }
 
 func (em *Auth) RegisterUser(
@@ -167,7 +170,7 @@ func (em *Auth) RegisterUser(
 
 func (em *Auth) Login(
 	ctx context.Context,
-	msg *sabuhp.Message,
+	msg sabuhp.Message,
 	tr sabuhp.Transport,
 ) sabuhp.MessageErr {
 	var span openTracing.Span
@@ -175,7 +178,8 @@ func (em *Auth) Login(
 		defer span.Finish()
 	}
 
-	var login, decodeErr = em.LoginCodec.Decode(bytes.NewReader(msg.Bytes))
+	var login Login
+	var decodeErr = em.Codec.Decode(bytes.NewReader(msg.Bytes), &login)
 	if decodeErr != nil {
 		return sabuhp.WrapErr(nerror.WrapOnly(decodeErr), false)
 	}
@@ -185,14 +189,26 @@ func (em *Auth) Login(
 		return sabuhp.WrapErr(nerror.WrapOnly(err), false)
 	}
 
-	_ = user
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := em.Codec.Encode(buffer, &user); encodedErr != nil {
+		return sabuhp.WrapErr(nerror.WrapOnly(encodedErr), false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(campid.RegisteredUserTopic)
+	newCraftedReply.Bytes = campid.CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
 	return nil
 }
 
 type LoggedInUser struct {
-	User *campid.User
-	Zone *campid.Zone
-	Jwt  *campid.Claim
+	ZoneId         string
+	AccessToken    string
+	RefreshToken   string
+	RefreshExpires int64
+	AccessExpires  int64
+	User           campid.User
 }
 
 func (em *Auth) LoginUser(
@@ -206,18 +222,6 @@ func (em *Auth) LoginUser(
 
 	if validateErr := login.Validate(); validateErr != nil {
 		return nil, nerror.WrapOnly(validateErr)
-	}
-
-	if len(login.Email) != 0 {
-		if validateEmailErr := em.EmailValidator.Validate(login.Email); validateEmailErr != nil {
-			return nil, nerror.WrapOnly(validateEmailErr)
-		}
-	}
-
-	if len(login.Phone) != 0 {
-		if validatePhoneErr := em.PhoneValidator.Validate(login.Phone); validatePhoneErr != nil {
-			return nil, nerror.WrapOnly(validatePhoneErr)
-		}
 	}
 
 	var retrievedErr error
@@ -252,56 +256,262 @@ func (em *Auth) LoginUser(
 	}
 
 	return &LoggedInUser{
-		User: retrievedUser,
-		Zone: userZone,
-		Jwt:  claim,
+		User:           retrievedUser.PublicSafeUser(),
+		ZoneId:         userZone.Id,
+		RefreshToken:   claim.RefreshToken,
+		AccessToken:    claim.AccessToken,
+		RefreshExpires: claim.RefreshExpires,
+		AccessExpires:  claim.AccessExpires,
 	}, nil
 }
 
-func (em *Auth) Refresh(
-	ctx context.Context,
-	msg *sabuhp.Message,
-) ([]*sabuhp.Message, error) {
-	return nil, nil
+type RefreshUserAccess struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
-type RefreshLogin struct {
-	UserId       string
-	RefreshToken string
-}
-
-func (el RefreshLogin) Validate() error {
-	if len(el.UserId) == 0 {
-		return nerror.New("RefreshLogin.UserId is required")
-	}
+func (el RefreshUserAccess) Validate() error {
 	if len(el.RefreshToken) == 0 {
 		return nerror.New("RefreshLogin.RefreshToken is required")
 	}
 	return nil
 }
 
-type RefreshLoginCodec interface {
-	Decode(r io.Reader) (RefreshLogin, error)
-	Encode(w io.Writer, s RefreshLogin) error
+func (em *Auth) Refresh(
+	ctx context.Context,
+	msg sabuhp.Message,
+	tr sabuhp.Transport,
+) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var login RefreshUserAccess
+	var decodeErr = em.Codec.Decode(bytes.NewReader(msg.Bytes), &login)
+	if decodeErr != nil {
+		return sabuhp.WrapErr(nerror.WrapOnly(decodeErr), false)
+	}
+
+	var refreshedDetail, err = em.RefreshLogin(ctx, login)
+	if err != nil {
+		return sabuhp.WrapErr(nerror.WrapOnly(err), false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := em.Codec.Encode(buffer, &refreshedDetail); encodedErr != nil {
+		return sabuhp.WrapErr(nerror.WrapOnly(encodedErr), false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(campid.RefreshedUserTopic)
+	newCraftedReply.Bytes = campid.CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+type RefreshedLogin struct {
+	UserId         string
+	ZoneId         string
+	AccessToken    string
+	RefreshToken   string
+	RefreshExpires int64
+	AccessExpires  int64
 }
 
 func (em *Auth) RefreshLogin(
 	ctx context.Context,
-	msg *sabuhp.Message,
-) ([]*sabuhp.Message, error) {
-	return nil, nil
+	req RefreshUserAccess,
+) (RefreshedLogin, error) {
+	var refreshed RefreshedLogin
+
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	if validateErr := req.Validate(); validateErr != nil {
+		return refreshed, nerror.WrapOnly(validateErr)
+	}
+
+	var claim, claimErr = em.Zones.JwtStore.Refresh(ctx, req.RefreshToken)
+	if claimErr != nil {
+		return refreshed, nerror.WrapOnly(claimErr)
+	}
+
+	refreshed.UserId = claim.UserId
+	refreshed.AccessToken = claim.AccessToken
+	refreshed.RefreshToken = claim.RefreshToken
+	refreshed.AccessExpires = claim.AccessExpires
+	refreshed.RefreshExpires = claim.RefreshExpires
+
+	return refreshed, nil
 }
 
-func (em *Auth) Callback(
+type VerifyAccess struct {
+	AccessToken string
+}
+
+func (v VerifyAccess) Validate() error {
+	if len(v.AccessToken) == 0 {
+		return nerror.New("VerifiedAccess.AccessToken is required")
+	}
+	return nil
+}
+
+func (em *Auth) Verify(
 	ctx context.Context,
-	msg *sabuhp.Message,
-) ([]*sabuhp.Message, error) {
-	return nil, nil
+	msg sabuhp.Message,
+	tr sabuhp.Transport,
+) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var login VerifyAccess
+	var decodeErr = em.Codec.Decode(bytes.NewReader(msg.Bytes), &login)
+	if decodeErr != nil {
+		return sabuhp.WrapErr(nerror.WrapOnly(decodeErr), false)
+	}
+
+	var refreshedDetail, err = em.VerifyAccess(ctx, login)
+	if err != nil {
+		return sabuhp.WrapErr(nerror.WrapOnly(err), false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := em.Codec.Encode(buffer, &refreshedDetail); encodedErr != nil {
+		return sabuhp.WrapErr(nerror.WrapOnly(encodedErr), false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(campid.VerifiedUserTopic)
+	newCraftedReply.Bytes = campid.CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+type VerifiedAccess struct {
+	UserId string
+	ZoneId string
+}
+
+func (em *Auth) VerifyAccess(
+	ctx context.Context,
+	ve VerifyAccess,
+) (VerifiedAccess, error) {
+	var vs VerifiedAccess
+
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	if validateErr := ve.Validate(); validateErr != nil {
+		return vs, nerror.WrapOnly(validateErr)
+	}
+
+	var claim, _, claimErr = em.Zones.JwtStore.VerifyAccess(ctx, ve.AccessToken)
+	if claimErr != nil {
+		return vs, nerror.WrapOnly(claimErr)
+	}
+
+	vs.UserId = claim.UserId
+	vs.ZoneId = claim.ZoneId
+
+	return vs, nil
+}
+
+func (em *Auth) FinishAuth(
+	ctx context.Context,
+	msg sabuhp.Message,
+	tr sabuhp.Transport,
+) sabuhp.MessageErr {
+	var newCraftedReply = msg.ReplyWithTopic(campid.VerifiedUserTopic)
+	newCraftedReply.Bytes = []byte(campid.NOT_SUPPORTED)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
+type LogoutUser struct {
+	AccessToken string
+}
+
+func (l LogoutUser) Validate() error {
+	if len(l.AccessToken) == 0 {
+		return nerror.New("LogoutUser.AccessToken is required")
+	}
+	return nil
 }
 
 func (em *Auth) Logout(
 	ctx context.Context,
-	msg *sabuhp.Message,
-) ([]*sabuhp.Message, error) {
-	return nil, nil
+	msg sabuhp.Message,
+	tr sabuhp.Transport,
+) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var lg LogoutUser
+	var decodeErr = em.Codec.Decode(bytes.NewReader(msg.Bytes), &lg)
+	if decodeErr != nil {
+		return sabuhp.WrapErr(nerror.WrapOnly(decodeErr), false)
+	}
+
+	var response, err = em.LogoutUser(ctx, lg)
+	if err != nil {
+		return sabuhp.WrapErr(nerror.WrapOnly(err), false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := em.Codec.Encode(buffer, &response); encodedErr != nil {
+		return sabuhp.WrapErr(nerror.WrapOnly(encodedErr), false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(campid.VerifiedUserTopic)
+	newCraftedReply.Bytes = campid.CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+type LoggedOutUser struct {
+	UserId string
+}
+
+func (em *Auth) LogoutUser(
+	ctx context.Context,
+	lg LogoutUser,
+) (LoggedOutUser, error) {
+	var lo LoggedOutUser
+
+	var claim, _, err = em.Zones.JwtStore.AccessTokenToClaim(ctx, lg.AccessToken)
+	if err != nil {
+		return lo, nerror.Wrap(err, "failed to find access token claim")
+	}
+
+	// delete refresh token
+	var _, removeRefreshTokenErr = em.Zones.JwtStore.RemoveRefreshId(ctx, claim.RefreshId.String())
+	if removeRefreshTokenErr != nil {
+		return lo, nerror.Wrap(removeRefreshTokenErr, "failed to find remove access id refresh token")
+	}
+
+	// delete related access id
+	var userId, removeAccessErr = em.Zones.JwtStore.RemoveAccessId(ctx, claim.AccessId.String())
+	if removeAccessErr != nil {
+		return lo, nerror.Wrap(removeAccessErr, "failed to find remove access id")
+	}
+
+	lo.UserId = userId
+
+	return lo, nil
 }

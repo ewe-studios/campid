@@ -210,8 +210,8 @@ func (u *User) validate() nerror.ErrorStack {
 }
 
 type UserCodec interface {
-	Decode(r io.Reader) (*User, error)
-	Encode(w io.Writer, s *User) error
+	Decode(r io.Reader) (User, error)
+	Encode(w io.Writer, s User) error
 }
 
 func CreateUserIndexMapping() (mapping.IndexMapping, error) {
@@ -288,7 +288,7 @@ func (u *UserStore) ById(ctx context.Context, id string) (*User, error) {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
 
-	return decodedUser, nil
+	return &decodedUser, nil
 }
 
 func (u *UserStore) ByPid(ctx context.Context, pid string) (*User, error) {
@@ -307,7 +307,7 @@ func (u *UserStore) ByPid(ctx context.Context, pid string) (*User, error) {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
 
-	return decodedUser, nil
+	return &decodedUser, nil
 }
 
 func (u *UserStore) ByEmail(ctx context.Context, email string) (*User, error) {
@@ -338,7 +338,7 @@ func (u *UserStore) ByEmail(ctx context.Context, email string) (*User, error) {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
 
-	return decodedUser, nil
+	return &decodedUser, nil
 }
 
 func (u *UserStore) ByPhone(ctx context.Context, phone string) (*User, error) {
@@ -369,7 +369,7 @@ func (u *UserStore) ByPhone(ctx context.Context, phone string) (*User, error) {
 		return nil, nerror.WrapOnly(decodeErr)
 	}
 
-	return decodedUser, nil
+	return &decodedUser, nil
 }
 
 func (u *UserStore) RemoveById(ctx context.Context, id string) (*User, error) {
@@ -395,10 +395,10 @@ func (u *UserStore) RemoveById(ctx context.Context, id string) (*User, error) {
 	}
 
 	if indexDelErr := u.Indexer.Delete(decodedUser.Pid); indexDelErr != nil {
-		return decodedUser, nerror.WrapOnly(indexDelErr)
+		return &decodedUser, nerror.WrapOnly(indexDelErr)
 	}
 
-	return decodedUser, nil
+	return &decodedUser, nil
 }
 
 func (u *UserStore) RemoveByPid(ctx context.Context, pid string) (*User, error) {
@@ -423,10 +423,10 @@ func (u *UserStore) RemoveByPid(ctx context.Context, pid string) (*User, error) 
 	}
 
 	if indexDelErr := u.Indexer.Delete(decodedUser.Pid); indexDelErr != nil {
-		return decodedUser, nerror.WrapOnly(indexDelErr)
+		return &decodedUser, nerror.WrapOnly(indexDelErr)
 	}
 
-	return decodedUser, nil
+	return &decodedUser, nil
 }
 
 func (u *UserStore) Update(ctx context.Context, updated *User) error {
@@ -445,7 +445,7 @@ func (u *UserStore) Update(ctx context.Context, updated *User) error {
 	}
 
 	var b strings.Builder
-	var encodedErr = u.Codec.Encode(&b, updated)
+	var encodedErr = u.Codec.Encode(&b, *updated)
 	if encodedErr != nil {
 		return nerror.WrapOnly(encodedErr)
 	}
@@ -522,7 +522,7 @@ func (u *UserStore) Create(ctx context.Context, data User) (*User, error) {
 	data.Pid = nxid.New().String()
 
 	var b strings.Builder
-	var encodedErr = u.Codec.Encode(&b, &data)
+	var encodedErr = u.Codec.Encode(&b, data)
 	if encodedErr != nil {
 		return nil, nerror.WrapOnly(encodedErr)
 	}

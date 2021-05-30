@@ -41,7 +41,7 @@ func CreateGroupDocumentMapping() (*mapping.DocumentMapping, error) {
 	return groupMapping, nil
 }
 
-// Groups embodies series of roles which are to be applied to
+// Group embodies series of roles which are to be applied to
 // a user.
 type Group struct {
 	Id    string
@@ -139,8 +139,8 @@ func (u *GroupStore) GroupsWithAnyRoles(ctx context.Context, roleNames ...string
 
 	var queries = make([]query.Query, len(roleNames))
 	for index, roleName := range roleNames {
-		var query = query.NewMatchQuery("Roles.Name: " + roleName)
-		queries[index] = query
+		var cquery = query.NewMatchQuery("Roles.Name: " + roleName)
+		queries[index] = cquery
 	}
 
 	var searchQuery = bleve.NewDisjunctionQuery(queries...)
@@ -184,8 +184,8 @@ func (u *GroupStore) GroupsWithRoles(ctx context.Context, roleNames ...string) (
 
 	var queries = make([]query.Query, len(roleNames))
 	for index, roleName := range roleNames {
-		var query = query.NewMatchQuery("Roles.Name: " + roleName)
-		queries[index] = query
+		var cquery = query.NewMatchQuery("Roles.Name: " + roleName)
+		queries[index] = cquery
 	}
 
 	var searchQuery = bleve.NewConjunctionQuery(queries...)
