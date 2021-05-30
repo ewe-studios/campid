@@ -195,7 +195,7 @@ func (em *Auth) Login(
 		return sabuhp.WrapErr(nerror.WrapOnly(encodedErr), false)
 	}
 
-	var newCraftedReply = msg.ReplyWithTopic(campid.RegisteredUserTopic)
+	var newCraftedReply = msg.ReplyWithTopic(campid.LoggedInUserTopic)
 	newCraftedReply.Bytes = campid.CopyBufferBytes(buffer)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
@@ -431,7 +431,7 @@ func (em *Auth) FinishAuth(
 	msg sabuhp.Message,
 	tr sabuhp.Transport,
 ) sabuhp.MessageErr {
-	var newCraftedReply = msg.ReplyWithTopic(campid.VerifiedUserTopic)
+	var newCraftedReply = msg.ReplyWithTopic(campid.FinishAuthUserTopic)
 	newCraftedReply.Bytes = []byte(campid.NOT_SUPPORTED)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
@@ -476,7 +476,7 @@ func (em *Auth) Logout(
 		return sabuhp.WrapErr(nerror.WrapOnly(encodedErr), false)
 	}
 
-	var newCraftedReply = msg.ReplyWithTopic(campid.VerifiedUserTopic)
+	var newCraftedReply = msg.ReplyWithTopic(campid.LoggedOutUserTopic)
 	newCraftedReply.Bytes = campid.CopyBufferBytes(buffer)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
