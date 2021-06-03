@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/dgrijalva/jwt-go"
 	"github.com/influx6/npkg/nerror"
@@ -275,6 +278,8 @@ func (jm *JWTStore) AccessTokenToClaim(ctx context.Context, accessToken string) 
 		return c, nil, nerror.WrapOnly(tokenErr)
 	}
 
+	// once parentAccessId is valid and we receive verification for new access id,
+	// then delete this.
 	var parentAccessId, hasParentAccessId = mappedClaims[parentAccessIdKey].(string)
 	if hasParentAccessId {
 		var parentAccessXid, accessXidErr = nxid.FromString(parentAccessId)
@@ -319,16 +324,6 @@ func (jm *JWTStore) AccessTokenToClaim(ctx context.Context, accessToken string) 
 
 	c.AccessId = accessXid
 
-	var accessKey = jm.formatAccessId(accessId)
-
-	// if we are able to get refresh key then it's not expired.
-	var userIdBytes, getUserIdErr = jm.Store.Get(accessKey)
-	if getUserIdErr != nil {
-		return c, nil, nerror.WrapOnly(getUserIdErr)
-	}
-
-	var userId = nunsafe.Bytes2String(userIdBytes)
-
 	var refreshId, hasRefreshId = mappedClaims[refreshIdKey].(string)
 	if !hasRefreshId {
 		return c, nil, nerror.New("claims has no rid key")
@@ -354,9 +349,7 @@ func (jm *JWTStore) AccessTokenToClaim(ctx context.Context, accessToken string) 
 		return c, nil, nerror.New("claims has no audience")
 	}
 
-	if userIdFromClaim != userId {
-		return c, nil, nerror.New("claims userId is not valid")
-	}
+	c.UserId = userIdFromClaim
 
 	var jwtIssuer, hasJwtIssuer = mappedClaims["iss"].(string)
 	if !hasJwtIssuer {
@@ -378,7 +371,6 @@ func (jm *JWTStore) AccessTokenToClaim(ctx context.Context, accessToken string) 
 		return c, nil, nerror.New("claims has no expiration time, this cant be from us")
 	}
 
-	c.UserId = userId
 	c.Id = dataClaimId
 	c.AccessToken = accessToken
 	c.AccessExpires = expirationTime
@@ -415,7 +407,7 @@ func (jm *JWTStore) VerifyAccess(ctx context.Context, accessToken string) (Claim
 
 		c.ParentAccessId = parentAccessXid
 
-		// delete parent acess id.
+		// delete parent access id.
 		if !parentAccessXid.IsNil() {
 			if _, removeErr := jm.RemoveAccessId(ctx, parentAccessXid.String()); removeErr != nil {
 				logs.New().LError().Message("failed to remove parent access id").Error("error", removeErr)
@@ -860,7 +852,7 @@ func (jm *JWTStore) GetUserIdByAccessId(ctx context.Context, accessId string) (s
 	return nunsafe.Bytes2String(userIdBytes), nil
 }
 
-func (jm *JWTStore) RemoveAllZoneJwt(ctx context.Context, sessionId string) error {
+func (jm *JWTStore) RemoveAllZoneJwt(ctx context.Context, zoneId string) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -868,7 +860,7 @@ func (jm *JWTStore) RemoveAllZoneJwt(ctx context.Context, sessionId string) erro
 
 	_ = ctx
 
-	var sessionPrefix = sessionId + dot
+	var sessionPrefix = zoneId + dot
 	var idList, err = jm.Store.EachKeyMatch(sessionPrefix)
 	if err != nil {
 		return nerror.WrapOnly(err)
@@ -882,11 +874,13 @@ func (jm *JWTStore) RemoveAllZoneJwt(ctx context.Context, sessionId string) erro
 }
 
 type JwtInfo struct {
+	Key       string
+	JwtId     string
 	RefreshId string
 	AccessId  string
 }
 
-func (jm *JWTStore) GetAllSessionJwt(ctx context.Context, sessionId string) (map[string]JwtInfo, error) {
+func (jm *JWTStore) GetAllZoneJwt(ctx context.Context, zoneId string) ([]JwtInfo, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
@@ -894,7 +888,7 @@ func (jm *JWTStore) GetAllSessionJwt(ctx context.Context, sessionId string) (map
 
 	_ = ctx
 
-	var sessionPrefix = sessionId + dot
+	var sessionPrefix = zoneId + dot
 	var idList, err = jm.Store.EachKeyMatch(sessionPrefix)
 	if err != nil {
 		return nil, nerror.WrapOnly(err)
@@ -909,7 +903,7 @@ func (jm *JWTStore) GetAllSessionJwt(ctx context.Context, sessionId string) (map
 		return nil, nerror.New("expected length of keys to values to match")
 	}
 
-	var set = map[string]JwtInfo{}
+	var set = make([]JwtInfo, len(idList))
 	for index, id := range idList {
 		var valueBytes = valueList[index]
 		if len(valueBytes) == 0 {
@@ -924,7 +918,9 @@ func (jm *JWTStore) GetAllSessionJwt(ctx context.Context, sessionId string) (map
 		}
 
 		var jwtId = strings.TrimPrefix(id, sessionPrefix)
-		set[jwtId] = JwtInfo{
+		set[index] = JwtInfo{
+			Key:       id,
+			JwtId:     jwtId,
 			RefreshId: refreshId,
 			AccessId:  accessId,
 		}
@@ -1033,4 +1029,88 @@ func (jm *JWTStore) splitFormattedAccessIdAndRefreshId(joinedId string) (accessI
 	accessId = parts[0]
 	refreshId = parts[1]
 	return
+}
+
+type JwtService struct {
+	Codec Codec
+	Store *JWTStore
+}
+
+func (cs *JwtService) GetAllForZone(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var zoneId = msg.Params.Get("zoneId")
+	if len(zoneId) == 0 {
+		var getAllErr = nerror.New("zoneId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var records, getAllErr = cs.Store.GetAllZoneJwt(ctx, zoneId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, records); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *JwtService) DeleteAllForZone(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var zoneId = msg.Params.Get("zoneId")
+	if len(zoneId) == 0 {
+		var getAllErr = nerror.New("zoneId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var getAllErr = cs.Store.RemoveAllZoneJwt(ctx, zoneId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *JwtService) DeleteJwtId(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var jwtId = msg.Params.Get("jwtId")
+	if len(jwtId) == 0 {
+		var getAllErr = nerror.New("jwtId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var getAllErr = cs.Store.RemoveJwtId(ctx, jwtId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
 }

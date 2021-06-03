@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
@@ -348,6 +351,45 @@ func (ds *DeviceStore) GetDeviceWithFingerprint(ctx context.Context, fingerprint
 	return &decodedDevice, nil
 }
 
+// RemoveDevice returns found device matching ip and city, and if provided, fingerprintId.
+func (ds *DeviceStore) RemoveDevice(ctx context.Context, id string) (*Device, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	if len(id) == 0 {
+		return nil, nerror.New("neither value can be empty").
+			Add("id", id)
+	}
+
+	var idQuery = query.NewMatchQuery("Id: " + id)
+	var req = bleve.NewSearchRequest(idQuery)
+
+	var searchResult, searchErr = ds.Indexer.Search(req)
+	if searchErr != nil {
+		return nil, nerror.Wrap(searchErr, "searching for ip").
+			Add("id", id)
+	}
+
+	if searchResult.Total == 0 {
+		return nil, nerror.New("not found").Add("id", id)
+	}
+
+	var matcher = searchResult.Hits[0]
+	var deviceData, getErr = ds.Store.Remove(matcher.ID)
+	if getErr != nil {
+		return nil, nerror.WrapOnly(getErr).Add("id", id)
+	}
+
+	var decodedDevice, decodeErr = ds.Codec.Decode(bytes.NewReader(deviceData))
+	if decodeErr != nil {
+		return nil, nerror.WrapOnly(decodeErr).Add("id", id)
+	}
+
+	return &decodedDevice, nil
+}
+
 // GetDevice returns found device matching ip and city, and if provided, fingerprintId.
 func (ds *DeviceStore) GetDevice(ctx context.Context, id string) (*Device, error) {
 	var span openTracing.Span
@@ -493,6 +535,50 @@ func (ds *DeviceStore) GetAllDevicesForUserId(ctx context.Context, userId string
 		var decodedDevice, decodeErr = ds.Codec.Decode(bytes.NewReader(deviceData))
 		if decodeErr != nil {
 			return nil, nerror.WrapOnly(decodeErr).Add("userId", userId)
+		}
+
+		devices[index] = decodedDevice
+	}
+
+	return devices, nil
+}
+
+// GetAllDevicesWithCity returns found device matching ip and city, and if provided, fingerprintId.
+func (ds *DeviceStore) GetAllDevicesWithCity(ctx context.Context, city string) ([]Device, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	if len(city) == 0 {
+		return nil, nerror.New("neither value can be empty").
+			Add("city", city)
+	}
+
+	var cityQuery = query.NewMatchQuery("Location.City: " + city)
+
+	var req = bleve.NewSearchRequest(cityQuery)
+
+	var searchResult, searchErr = ds.Indexer.Search(req)
+	if searchErr != nil {
+		return nil, nerror.Wrap(searchErr, "searching for ip").
+			Add("city", city)
+	}
+
+	if searchResult.Total == 0 {
+		return nil, nerror.New("not found")
+	}
+
+	var devices = make([]Device, searchResult.Total)
+	for index, matcher := range searchResult.Hits {
+		var deviceData, getErr = ds.Store.Get(matcher.ID)
+		if getErr != nil {
+			return nil, nerror.WrapOnly(getErr)
+		}
+
+		var decodedDevice, decodeErr = ds.Codec.Decode(bytes.NewReader(deviceData))
+		if decodeErr != nil {
+			return nil, nerror.WrapOnly(decodeErr)
 		}
 
 		devices[index] = decodedDevice
@@ -660,4 +746,276 @@ func (ds *DeviceStore) HasIP(ctx context.Context, ip string) (bool, error) {
 
 func escapeIP(ip string) string {
 	return strings.ReplaceAll(ip, ":", `\:`)
+}
+
+type DeviceService struct {
+	Codec Codec
+	Store *DeviceStore
+}
+
+func (cs *DeviceService) GetAll(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var records, getAllErr = cs.Store.GetAll(ctx)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, records); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *DeviceService) GetDevicesWithCityAndIp(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var ip = msg.Params.Get("ip")
+	var city = msg.Params.Get("city")
+	if len(city) == 0 || len(ip) == 0 {
+		var getAllErr = nerror.New("city or ip param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.GetAllDevicesWithIPAndCity(ctx, ip, city)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *DeviceService) GetDevicesForZoneId(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var zoneId = msg.Params.Get("zoneId")
+	if len(zoneId) == 0 {
+		var getAllErr = nerror.New("zoneId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.GetAllDevicesForZoneId(ctx, zoneId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *DeviceService) GetDevicesForUser(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var userId = msg.Params.Get("userId")
+	if len(userId) == 0 {
+		var getAllErr = nerror.New("userId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.GetAllDevicesForUserId(ctx, userId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *DeviceService) GetDevicesWithCity(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var city = msg.Params.Get("city")
+	if len(city) == 0 {
+		var getAllErr = nerror.New("city param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.GetAllDevicesWithCity(ctx, city)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *DeviceService) GetDeviceWithFingerprint(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var fingerprintId = msg.Params.Get("fingerprintId")
+	if len(fingerprintId) == 0 {
+		var getAllErr = nerror.New("fingerprintId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.GetDeviceWithFingerprint(ctx, fingerprintId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *DeviceService) DeleteDevice(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var deviceId = msg.Params.Get("deviceId")
+	if len(deviceId) == 0 {
+		var getAllErr = nerror.New("deviceId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.RemoveDevice(ctx, deviceId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *DeviceService) DeleteDevicesForZoneId(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var zoneId = msg.Params.Get("zoneId")
+	if len(zoneId) == 0 {
+		var getAllErr = nerror.New("zoneId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var getAllErr = cs.Store.RemoveAllDevicesForZoneId(ctx, zoneId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *DeviceService) GetDevice(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var deviceId = msg.Params.Get("deviceId")
+	if len(deviceId) == 0 {
+		var getAllErr = nerror.New("deviceId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.GetDevice(ctx, deviceId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
 }

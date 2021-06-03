@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/analysis/analyzer/keyword"
@@ -254,16 +257,29 @@ func CreateUserDocumentMapping() (*mapping.DocumentMapping, error) {
 }
 
 type UserStore struct {
-	Codec   UserCodec
-	Indexer bleve.Index
-	Store   nstorage.ExpirableStore
+	Codec          UserCodec
+	Indexer        bleve.Index
+	Store          nstorage.ExpirableStore
+	EmailValidator EmailValidator
+	PhoneValidator PhoneValidator
+	Password       *Password
 }
 
-func NewUserStore(store nstorage.ExpirableStore, codec UserCodec, indexer bleve.Index) *UserStore {
+func NewUserStore(
+	store nstorage.ExpirableStore,
+	codec UserCodec,
+	indexer bleve.Index,
+	password *Password,
+	emailValidator EmailValidator,
+	phoneValidator PhoneValidator,
+) *UserStore {
 	return &UserStore{
-		Codec:   codec,
-		Store:   store,
-		Indexer: indexer,
+		Codec:          codec,
+		Store:          store,
+		Indexer:        indexer,
+		Password:       password,
+		EmailValidator: emailValidator,
+		PhoneValidator: phoneValidator,
 	}
 }
 
@@ -541,4 +557,62 @@ func (u *UserStore) Create(ctx context.Context, data User) (*User, error) {
 	}
 
 	return &data, nil
+}
+
+func (u *UserStore) Register(ctx context.Context, newUser NewUser) (*User, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var validateErr = newUser.Validate()
+	if validateErr != nil {
+		return nil, nerror.WrapOnly(validateErr.Err())
+	}
+
+	if len(newUser.Email) != 0 {
+		if validateEmailErr := u.EmailValidator.ValidateEmail(newUser.Email); validateEmailErr != nil {
+			return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(validateEmailErr), http.StatusBadRequest, true)
+		}
+	}
+
+	if len(newUser.Phone) != 0 {
+		if validatePhoneErr := u.PhoneValidator.ValidatePhone(newUser.Phone); validatePhoneErr != nil {
+			return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(validatePhoneErr), http.StatusBadRequest, true)
+		}
+	}
+
+	var hasUser bool
+	var hasUserErr error
+	if len(newUser.Email) != 0 && len(newUser.Phone) == 0 {
+		hasUser, hasUserErr = u.HasEmail(ctx, newUser.Phone)
+	}
+
+	if len(newUser.Email) == 0 && len(newUser.Phone) != 0 {
+		hasUser, hasUserErr = u.HasPhone(ctx, newUser.Phone)
+	}
+
+	if hasUserErr != nil {
+		return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(hasUserErr), http.StatusBadRequest, true)
+	}
+
+	if hasUser {
+		var existingUserErr ExistingUserErr
+		return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(existingUserErr), http.StatusBadRequest, true)
+	}
+
+	var hashedPassword, hashedPasswordErr = u.Password.Hash(newUser.Password)
+	if hashedPasswordErr != nil {
+		return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(hashedPasswordErr), http.StatusBadRequest, true)
+	}
+
+	var userData = newUser.ToUser()
+	userData.HashedPassword = nunsafe.Bytes2String(hashedPassword)
+
+	var createdUser, failedCreateUserErr = u.Create(ctx, userData)
+	if failedCreateUserErr != nil {
+		return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(failedCreateUserErr), http.StatusInternalServerError, false)
+	}
+
+	return createdUser, nil
 }

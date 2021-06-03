@@ -96,8 +96,8 @@ type ZoneStore struct {
 	Store nstorage.ExpirableStore
 }
 
-// NewSessionStore returns a new instance of a ZoneStore.
-func NewSessionStore(codec ZoneCodec, store nstorage.ExpirableStore) *ZoneStore {
+// NewZoneStore returns a new instance of a ZoneStore.
+func NewZoneStore(codec ZoneCodec, store nstorage.ExpirableStore) *ZoneStore {
 	return &ZoneStore{
 		Codec: codec,
 		Store: store,

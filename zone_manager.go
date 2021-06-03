@@ -18,7 +18,7 @@ type UserZoneManager struct {
 	DeviceStore *DeviceStore
 }
 
-func NewSessionManager(store *ZoneStore, jwtStore *JWTStore, deviceStore *DeviceStore) *UserZoneManager {
+func NewZoneManager(store *ZoneStore, jwtStore *JWTStore, deviceStore *DeviceStore) *UserZoneManager {
 	return &UserZoneManager{
 		ZoneStore:   store,
 		JwtStore:    jwtStore,
@@ -36,7 +36,7 @@ func (s *UserZoneManager) DistrustDevice(
 		defer span.Finish()
 	}
 
-	var device, getDeviceErr = s.DeviceStore.GetDeviceForSessionId(ctx, zoneId, deviceId)
+	var device, getDeviceErr = s.DeviceStore.GetDeviceForZoneId(ctx, zoneId, deviceId)
 	if getDeviceErr != nil {
 		return nil, nerror.WrapOnly(getDeviceErr)
 	}
@@ -60,7 +60,7 @@ func (s *UserZoneManager) TrustDevice(
 		defer span.Finish()
 	}
 
-	var device, getDeviceErr = s.DeviceStore.GetDeviceForSessionId(ctx, zoneId, deviceId)
+	var device, getDeviceErr = s.DeviceStore.GetDeviceForZoneId(ctx, zoneId, deviceId)
 	if getDeviceErr != nil {
 		return nil, nerror.WrapOnly(getDeviceErr)
 	}
@@ -84,7 +84,7 @@ func (s *UserZoneManager) EnableDevice(
 		defer span.Finish()
 	}
 
-	var device, getDeviceErr = s.DeviceStore.GetDeviceForSessionId(ctx, zoneId, deviceId)
+	var device, getDeviceErr = s.DeviceStore.GetDeviceForZoneId(ctx, zoneId, deviceId)
 	if getDeviceErr != nil {
 		return nil, nerror.WrapOnly(getDeviceErr)
 	}
@@ -108,7 +108,7 @@ func (s *UserZoneManager) DisableDevice(
 		defer span.Finish()
 	}
 
-	var device, getDeviceErr = s.DeviceStore.GetDeviceForSessionId(ctx, zoneId, deviceId)
+	var device, getDeviceErr = s.DeviceStore.GetDeviceForZoneId(ctx, zoneId, deviceId)
 	if getDeviceErr != nil {
 		return nil, nerror.WrapOnly(getDeviceErr)
 	}
@@ -160,7 +160,7 @@ func (s *UserZoneManager) GetSessionAndDevices(
 		return nil, nil, nerror.WrapOnly(getSessionErr)
 	}
 
-	var devices, getDeviceErr = s.DeviceStore.GetAllDevicesForSessionId(ctx, userSession.Id)
+	var devices, getDeviceErr = s.DeviceStore.GetAllDevicesForZoneId(ctx, userSession.Id)
 	if getDeviceErr != nil {
 		return nil, nil, nerror.WrapOnly(getDeviceErr)
 	}

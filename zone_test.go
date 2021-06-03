@@ -10,9 +10,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSessionStore(t *testing.T) {
+func TestZoneStore(t *testing.T) {
 	var store = nmap.NewExprByteStore(100)
-	var sessionStore = NewSessionStore(&JsonSessionCodec{}, store)
+	var sessionStore = NewZoneStore(&JsonZoneCodec{}, store)
 
 	var sz Zone
 	sz.UserId = "1"

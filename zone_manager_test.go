@@ -100,11 +100,11 @@ func TestSessionManager(t *testing.T) {
 	defer indexer.Close()
 
 	var jwtStore = NewJWTStore(config)
-	var sessionStore = NewSessionStore(&JsonSessionCodec{}, sessionStorage)
+	var sessionStore = NewZoneStore(&JsonSessionCodec{}, sessionStorage)
 	var deviceStore = NewDeviceStore(&JsonDeviceCodec{}, deviceStorage, indexer)
 
 	var ctx = context.Background()
-	var sessionManager = NewSessionManager(sessionStore, jwtStore, deviceStore)
+	var sessionManager = NewZoneManager(sessionStore, jwtStore, deviceStore)
 
 	defer clearAllStorage()
 

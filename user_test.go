@@ -26,6 +26,12 @@ var sampleUser = User{
 	PhoneVerified:  false,
 }
 
+var passwordConfig = &Password{
+	Cost:      10,
+	MinLength: 10,
+	MaxLength: 70,
+}
+
 func TestUserStore(t *testing.T) {
 	defer os.RemoveAll(t.Name())
 	os.RemoveAll(t.Name())
@@ -50,6 +56,9 @@ func TestUserStore(t *testing.T) {
 			store,
 			&userCodec,
 			indexer,
+			passwordConfig,
+			&EmailValidatorImpl{},
+			&PhoneValidatorImpl{},
 		)
 
 		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
@@ -75,6 +84,9 @@ func TestUserStore(t *testing.T) {
 			store,
 			&userCodec,
 			indexer,
+			passwordConfig,
+			&EmailValidatorImpl{},
+			&PhoneValidatorImpl{},
 		)
 
 		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
@@ -114,6 +126,9 @@ func TestUserStore(t *testing.T) {
 			store,
 			&userCodec,
 			indexer,
+			passwordConfig,
+			&EmailValidatorImpl{},
+			&PhoneValidatorImpl{},
 		)
 
 		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
@@ -145,6 +160,9 @@ func TestUserStore(t *testing.T) {
 			store,
 			&userCodec,
 			indexer,
+			passwordConfig,
+			&EmailValidatorImpl{},
+			&PhoneValidatorImpl{},
 		)
 
 		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
@@ -176,6 +194,9 @@ func TestUserStore(t *testing.T) {
 			store,
 			&userCodec,
 			indexer,
+			passwordConfig,
+			&EmailValidatorImpl{},
+			&PhoneValidatorImpl{},
 		)
 
 		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
@@ -207,6 +228,9 @@ func TestUserStore(t *testing.T) {
 			store,
 			&userCodec,
 			indexer,
+			passwordConfig,
+			&EmailValidatorImpl{},
+			&PhoneValidatorImpl{},
 		)
 
 		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
@@ -238,6 +262,9 @@ func TestUserStore(t *testing.T) {
 			store,
 			&userCodec,
 			indexer,
+			passwordConfig,
+			&EmailValidatorImpl{},
+			&PhoneValidatorImpl{},
 		)
 
 		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
@@ -267,6 +294,9 @@ func TestUserStore(t *testing.T) {
 			store,
 			&userCodec,
 			indexer,
+			passwordConfig,
+			&EmailValidatorImpl{},
+			&PhoneValidatorImpl{},
 		)
 
 		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
@@ -296,6 +326,9 @@ func TestUserStore(t *testing.T) {
 			store,
 			&userCodec,
 			indexer,
+			passwordConfig,
+			&EmailValidatorImpl{},
+			&PhoneValidatorImpl{},
 		)
 
 		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)
@@ -327,6 +360,9 @@ func TestUserStore(t *testing.T) {
 			store,
 			&userCodec,
 			indexer,
+			passwordConfig,
+			&EmailValidatorImpl{},
+			&PhoneValidatorImpl{},
 		)
 
 		var addedUser, addErr = userStore.Create(context.Background(), sampleUser)

@@ -1,9 +1,13 @@
 package campid
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
+	"net/http"
 	"time"
+
+	"github.com/ewe-studios/sabuhp"
 
 	"github.com/influx6/npkg/nerror"
 	"github.com/influx6/npkg/nstorage"
@@ -138,4 +142,66 @@ func (cf *CSRFStore) Get(ctx context.Context, sessionId string) (string, error) 
 	}
 
 	return nunsafe.Bytes2String(existingToken), nil
+}
+
+type CSRFService struct {
+	Codec        Codec
+	Store        *CSRFStore
+	DeletedToken sabuhp.Topic
+}
+
+const sessionParamName = "sessionId"
+
+func (cs *CSRFService) Delete(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var sessionId = msg.Params.Get(sessionParamName)
+	if len(sessionId) == 0 {
+		var getSessionErr = nerror.New("param %q not found in message", sessionParamName)
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getSessionErr), http.StatusBadRequest, true)
+	}
+
+	var value, deleteValErr = cs.Store.Delete(ctx, sessionId)
+	if deleteValErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(deleteValErr), http.StatusBadRequest, true)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(cs.DeletedToken)
+	newCraftedReply.Bytes = []byte(value)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	// send to reply topic as well
+	newCraftedReply.Topic = msg.Topic.ReplyTopic()
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *CSRFService) GetAll(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var records, getAllErr = cs.Store.GetAll(ctx)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, records); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
 }
