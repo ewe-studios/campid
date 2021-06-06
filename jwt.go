@@ -135,6 +135,16 @@ type Claim struct {
 	Data           map[string]string
 }
 
+func (c Claim) IsRefreshTokenExpired() bool {
+	var expirationTimeValue = time.Unix(c.RefreshExpires, 0)
+	return time.Since(expirationTimeValue) > 0
+}
+
+func (c Claim) IsAccessTokenExpired() bool {
+	var expirationTimeValue = time.Unix(c.AccessExpires, 0)
+	return time.Since(expirationTimeValue) > 0
+}
+
 func (jm *JWTStore) Create(ctx context.Context, sessionId string, userId string, data map[string]string) (Claim, error) {
 	return jm.CreateWithId(ctx, nxid.New(), sessionId, userId, nxid.NilID(), data)
 }
@@ -1032,8 +1042,9 @@ func (jm *JWTStore) splitFormattedAccessIdAndRefreshId(joinedId string) (accessI
 }
 
 type JwtService struct {
-	Codec Codec
-	Store *JWTStore
+	Codec  Codec
+	Store  *JWTStore
+	Topics sabuhp.TopicPartial
 }
 
 func (cs *JwtService) GetAllForZone(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
@@ -1085,9 +1096,12 @@ func (cs *JwtService) DeleteAllForZone(ctx context.Context, msg sabuhp.Message, 
 	}
 
 	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Params.Set("zoneId", zoneId)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
+	newCraftedReply.Topic = cs.Topics(DeletedJwtTopic)
+	tr.ToBoth(newCraftedReply)
 	return nil
 }
 
@@ -1110,7 +1124,10 @@ func (cs *JwtService) DeleteJwtId(ctx context.Context, msg sabuhp.Message, tr sa
 
 	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	newCraftedReply.Params.Set("jwtId", jwtId)
 	tr.ToBoth(newCraftedReply)
 
+	newCraftedReply.Topic = cs.Topics(DeletedJwtTopic)
+	tr.ToBoth(newCraftedReply)
 	return nil
 }

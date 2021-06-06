@@ -126,18 +126,18 @@ func (s *UserZoneManager) GetSessionAndJwtClaims(
 	ctx context.Context,
 	zoneId string,
 	userId string,
-) (*Zone, map[string]JwtInfo, error) {
+) (*Zone, []JwtInfo, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
 	}
 
-	var userSession, getSessionErr = s.ZoneStore.GetById(ctx, zoneId, userId)
+	var userSession, getSessionErr = s.ZoneStore.GetByZoneAndUserId(ctx, zoneId, userId)
 	if getSessionErr != nil {
 		return nil, nil, nerror.WrapOnly(getSessionErr)
 	}
 
-	var jwtInfoList, getDeviceErr = s.JwtStore.GetAllSessionJwt(ctx, userSession.Id)
+	var jwtInfoList, getDeviceErr = s.JwtStore.GetAllZoneJwt(ctx, userSession.Id)
 	if getDeviceErr != nil {
 		return nil, nil, nerror.WrapOnly(getDeviceErr)
 	}
@@ -155,7 +155,7 @@ func (s *UserZoneManager) GetSessionAndDevices(
 		defer span.Finish()
 	}
 
-	var userSession, getSessionErr = s.ZoneStore.GetById(ctx, zoneId, userId)
+	var userSession, getSessionErr = s.ZoneStore.GetByZoneAndUserId(ctx, zoneId, userId)
 	if getSessionErr != nil {
 		return nil, nil, nerror.WrapOnly(getSessionErr)
 	}
@@ -177,7 +177,7 @@ func (s *UserZoneManager) Get(
 		defer span.Finish()
 	}
 
-	var userSession, getSessionErr = s.ZoneStore.GetOneForUser(ctx, userId)
+	var userSession, getSessionErr = s.ZoneStore.GetForUserId(ctx, userId)
 	if getSessionErr != nil {
 		return nil, nerror.WrapOnly(getSessionErr)
 	}
@@ -286,7 +286,7 @@ func (s *UserZoneManager) Verify(
 	// get the first session available for this user, generally session
 	// manager as far as is the sole manager of the session store will only
 	// ever create one per user.
-	var userSession, getSessionErr = s.ZoneStore.GetById(ctx, zoneId, userId)
+	var userSession, getSessionErr = s.ZoneStore.GetByZoneAndUserId(ctx, zoneId, userId)
 	if getSessionErr != nil {
 		return nil, nil, nil, nerror.WrapOnly(getSessionErr)
 	}
@@ -313,7 +313,7 @@ func (s *UserZoneManager) Refresh(
 	// get the first session available for this user, generally session
 	// manager as far as is the sole manager of the session store will only
 	// ever create one per user.
-	var userSession, getSessionErr = s.ZoneStore.GetById(ctx, zoneId, userId)
+	var userSession, getSessionErr = s.ZoneStore.GetByZoneAndUserId(ctx, zoneId, userId)
 	if getSessionErr != nil {
 		return nil, nil, nerror.WrapOnly(getSessionErr)
 	}
@@ -380,7 +380,7 @@ func (s *UserZoneManager) CreateZone(
 	// get the first session available for this user, generally session
 	// manager as far as is the sole manager of the session store will only
 	// ever create one per user.
-	if userZone, getZoneErr := s.ZoneStore.GetOneForUser(ctx, userId); getZoneErr == nil {
+	if userZone, getZoneErr := s.ZoneStore.GetForUserId(ctx, userId); getZoneErr == nil {
 		return userZone, nil
 	}
 
@@ -419,7 +419,7 @@ func (s *UserZoneManager) AddJwtSessionToZone(
 	// get the first session available for this user, generally session
 	// manager as far as is the sole manager of the session store will only
 	// ever create one per user.
-	var userSession, getSessionErr = s.ZoneStore.GetById(ctx, zoneId, userId)
+	var userSession, getSessionErr = s.ZoneStore.GetByZoneAndUserId(ctx, zoneId, userId)
 	if getSessionErr != nil {
 		return nil, nil, nerror.WrapOnly(getSessionErr)
 	}
@@ -447,7 +447,7 @@ func (s *UserZoneManager) AddDeviceToZone(
 	// get the first session available for this user, generally session
 	// manager as far as is the sole manager of the session store will only
 	// ever create one per user.
-	var userSession, getSessionErr = s.ZoneStore.GetById(ctx, zoneId, userId)
+	var userSession, getSessionErr = s.ZoneStore.GetByZoneAndUserId(ctx, zoneId, userId)
 	if getSessionErr != nil {
 		return nil, nil, nerror.WrapOnly(getSessionErr)
 	}

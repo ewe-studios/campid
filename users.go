@@ -283,6 +283,29 @@ func NewUserStore(
 	}
 }
 
+// GetAll returns all users stored within Store.
+func (s *UserStore) GetAll(ctx context.Context) ([]User, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var users []User
+	var err = s.Store.Each(func(content []byte, key string) error {
+		var reader = bytes.NewBuffer(content)
+		var zone, decodeErr = s.Codec.Decode(reader)
+		if decodeErr != nil {
+			return nerror.WrapOnly(decodeErr)
+		}
+		users = append(users, zone)
+		return nil
+	})
+	if err != nil {
+		return nil, nerror.WrapOnly(err)
+	}
+	return users, nil
+}
+
 func (u *UserStore) ById(ctx context.Context, id string) (*User, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
@@ -615,4 +638,395 @@ func (u *UserStore) Register(ctx context.Context, newUser NewUser) (*User, error
 	}
 
 	return createdUser, nil
+}
+
+type UserService struct {
+	Codec  Codec
+	Store  *UserStore
+	Topics sabuhp.TopicPartial
+}
+
+func (cs *UserService) GetAll(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var records, getAllErr = cs.Store.GetAll(ctx)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, records); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *UserService) GetUserByPhone(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var phone = msg.Params.Get("phone")
+	if len(phone) == 0 {
+		var getAllErr = nerror.New("phone param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.ByPhone(ctx, phone)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *UserService) GetUser(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var userId = msg.Params.Get("userId")
+	if len(userId) == 0 {
+		var getAllErr = nerror.New("userId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.ById(ctx, userId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *UserService) GetUserByEmail(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var email = msg.Params.Get("email")
+	if len(email) == 0 {
+		var getAllErr = nerror.New("email param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.ById(ctx, email)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *UserService) GetForById(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var id = msg.Params.Get("id")
+	if len(id) == 0 {
+		var getAllErr = nerror.New("id param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.ById(ctx, id)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *UserService) GetForByPid(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var pid = msg.Params.Get("pid")
+	if len(pid) == 0 {
+		var getAllErr = nerror.New("pid param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.ByPid(ctx, pid)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *UserService) RemoveUserByPid(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var pid = msg.Params.Get("pid")
+	if len(pid) == 0 {
+		var getAllErr = nerror.New("pid param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.RemoveByPid(ctx, pid)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(DeletedUserTopic)
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
+func (cs *UserService) RemoveUserById(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var id = msg.Params.Get("id")
+	if len(id) == 0 {
+		var getAllErr = nerror.New("id param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.RemoveById(ctx, id)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.Params.Set("id", id)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(DeletedUserTopic)
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
+func (cs *UserService) RemoveUserByUserId(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var userId = msg.Params.Get("userId")
+	if len(userId) == 0 {
+		var getAllErr = nerror.New("userId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.RemoveById(ctx, userId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, record); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.Params.Set("userId", userId)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(DeletedUserTopic)
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
+func (cs *UserService) UpdateUser(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var readBuffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&readBuffer)
+
+	var update User
+	if decodedErr := cs.Codec.Decode(readBuffer, &update); decodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(decodedErr), http.StatusBadRequest, true)
+	}
+
+	var updateErr = cs.Store.Update(ctx, &update)
+	if updateErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(updateErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, update); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(UserUpdatedTopic)
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+func (cs *UserService) CreateUser(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var readBuffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&readBuffer)
+
+	var update User
+	if decodedErr := cs.Codec.Decode(readBuffer, &update); decodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(decodedErr), http.StatusBadRequest, true)
+	}
+
+	var createdGroup, updateErr = cs.Store.Create(ctx, update)
+	if updateErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(updateErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, createdGroup); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(UserCreatedTopic)
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
+func (cs *UserService) RegisterUser(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var readBuffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&readBuffer)
+
+	var update NewUser
+	if decodedErr := cs.Codec.Decode(readBuffer, &update); decodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(decodedErr), http.StatusBadRequest, true)
+	}
+
+	var createdGroup, updateErr = cs.Store.Register(ctx, update)
+	if updateErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(updateErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, createdGroup); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(UserCreatedTopic)
+	tr.ToBoth(newCraftedReply)
+	return nil
 }

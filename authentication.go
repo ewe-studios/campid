@@ -10,11 +10,16 @@ import (
 
 type Authenticator interface {
 	Login(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
-	Verify(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
 	Logout(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
-	Refresh(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
+	VerifyLogin(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
+	FinishLogin(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
+
+	VerifyAccess(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
+	RefreshAccess(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
+
 	Register(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
-	FinishAuth(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
+	VerifyRegistration(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
+	FinishRegistration(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr
 }
 
 type PhoneValidator interface {

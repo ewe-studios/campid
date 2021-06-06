@@ -22,6 +22,8 @@ var bufferPool = sync.Pool{
 	},
 }
 
+var _ campid.Authenticator = (*Auth)(nil)
+
 type Login struct {
 	Email       string
 	Phone       string
@@ -45,20 +47,13 @@ func (el Login) Validate() error {
 }
 
 type Auth struct {
-	Codec                 campid.Codec
-	PhoneValidator        campid.PhoneValidator
-	EmailValidator        campid.EmailValidator
-	Passwords             *campid.Password
-	Users                 *campid.UserStore
-	Zones                 *campid.UserZoneManager
-	LoggedOutUserTopic    sabuhp.Topic
-	LoggedInUserTopic     sabuhp.Topic
-	RefreshedUserTopic    sabuhp.Topic
-	VerifiedUserTopic     sabuhp.Topic
-	RegisteredUserTopic   sabuhp.Topic
-	FinishedAuthUserTopic sabuhp.Topic
-	CreatedUserTopic      sabuhp.Topic
-	DeletedUserTopic      sabuhp.Topic
+	Codec          campid.Codec
+	PhoneValidator campid.PhoneValidator
+	EmailValidator campid.EmailValidator
+	Passwords      *campid.Password
+	Users          *campid.UserStore
+	Zones          *campid.UserZoneManager
+	Topics         sabuhp.TopicPartial
 }
 
 type RegisteredUser struct {
@@ -68,7 +63,17 @@ type RegisteredUser struct {
 	Error     error
 }
 
-func (em *Auth) Register(
+func (auth *Auth) RegisterWithBusRelay(bus *sabuhp.BusRelay, serviceGroup string) {
+	bus.Group(campid.LogOutUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.Logout))
+	bus.Group(campid.LogInUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.Login))
+	bus.Group(campid.RefreshUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.RefreshAccess))
+	bus.Group(campid.VerifyUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.VerifyAccess))
+	bus.Group(campid.RegisterUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.Register))
+	bus.Group(campid.FinishLoginUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.FinishLogin))
+	bus.Group(campid.FinishRegistrationTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.FinishRegistration))
+}
+
+func (auth *Auth) Register(
 	ctx context.Context,
 	msg sabuhp.Message,
 	tr sabuhp.Transport,
@@ -79,12 +84,12 @@ func (em *Auth) Register(
 	}
 
 	var newUser campid.NewUser
-	var decodeErr = em.Codec.Decode(bytes.NewReader(msg.Bytes), &newUser)
+	var decodeErr = auth.Codec.Decode(bytes.NewReader(msg.Bytes), &newUser)
 	if decodeErr != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(decodeErr), http.StatusBadRequest, true)
 	}
 
-	var user, err = em.RegisterUser(ctx, newUser)
+	var user, err = auth.RegisterUser(ctx, newUser)
 	if err != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), true)
 	}
@@ -99,18 +104,18 @@ func (em *Auth) Register(
 	registeredUser.FromTopic = msg.Topic.String()
 	registeredUser.When = time.Now()
 
-	if encodedErr := em.Codec.Encode(encodedUserDataWriter, registeredUser); encodedErr != nil {
+	if encodedErr := auth.Codec.Encode(encodedUserDataWriter, registeredUser); encodedErr != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
 	}
 
-	var newCraftedReply = msg.ReplyWithTopic(em.RegisteredUserTopic)
+	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.RegisteredUserTopic))
 	newCraftedReply.Bytes = campid.CopyBufferBytes(encodedUserDataWriter)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 	return nil
 }
 
-func (em *Auth) RegisterUser(
+func (auth *Auth) RegisterUser(
 	ctx context.Context,
 	newUser campid.NewUser,
 ) (*campid.User, sabuhp.MessageErr) {
@@ -119,7 +124,7 @@ func (em *Auth) RegisterUser(
 		defer span.Finish()
 	}
 
-	var createdUser, failedCreateUserErr = em.Users.Register(ctx, newUser)
+	var createdUser, failedCreateUserErr = auth.Users.Register(ctx, newUser)
 	if failedCreateUserErr != nil {
 		return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(failedCreateUserErr), http.StatusInternalServerError, false)
 	}
@@ -127,7 +132,7 @@ func (em *Auth) RegisterUser(
 	var sessionData = map[string]string{}
 	sessionData["email"] = createdUser.Email
 
-	var _, createZoneErr = em.Zones.CreateZone(ctx, createdUser.Id, "api", sessionData)
+	var _, createZoneErr = auth.Zones.CreateZone(ctx, createdUser.Id, "api", sessionData)
 	if createZoneErr != nil {
 		return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(createZoneErr), http.StatusInternalServerError, false)
 	}
@@ -135,7 +140,7 @@ func (em *Auth) RegisterUser(
 	return createdUser, nil
 }
 
-func (em *Auth) Login(
+func (auth *Auth) Login(
 	ctx context.Context,
 	msg sabuhp.Message,
 	tr sabuhp.Transport,
@@ -146,26 +151,26 @@ func (em *Auth) Login(
 	}
 
 	var login Login
-	var decodeErr = em.Codec.Decode(bytes.NewReader(msg.Bytes), &login)
+	var decodeErr = auth.Codec.Decode(bytes.NewReader(msg.Bytes), &login)
 	if decodeErr != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(decodeErr), http.StatusBadRequest, false)
 	}
 
-	var user, err = em.LoginUser(ctx, login)
+	var user, err = auth.LoginUser(ctx, login)
 	if err != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), false)
 	}
 
 	var buffer = bufferPool.New().(*bytes.Buffer)
 	defer bufferPool.Put(&buffer)
-	if encodedErr := em.Codec.Encode(buffer, &user); encodedErr != nil {
+	if encodedErr := auth.Codec.Encode(buffer, &user); encodedErr != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
 	}
 
 	var data = campid.CopyBufferBytes(buffer)
 
 	// send to event for logged in user
-	var newCraftedReply = msg.ReplyWithTopic(em.LoggedInUserTopic)
+	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.LoggedInUserTopic))
 	newCraftedReply.Headers.Add("Authorization", fmt.Sprintf("Bearer %s", user.AccessToken))
 	newCraftedReply.Cookies = append(newCraftedReply.Cookies, sabuhp.Cookie{Name: "accessToken", Value: user.AccessToken, HttpOnly: true})
 	newCraftedReply.Cookies = append(newCraftedReply.Cookies, sabuhp.Cookie{Name: "refreshToken", Value: user.RefreshToken, HttpOnly: true})
@@ -189,7 +194,7 @@ type LoggedInUser struct {
 	User           campid.User
 }
 
-func (em *Auth) LoginUser(
+func (auth *Auth) LoginUser(
 	ctx context.Context,
 	login Login,
 ) (*LoggedInUser, sabuhp.MessageErr) {
@@ -206,20 +211,20 @@ func (em *Auth) LoginUser(
 	var retrievedUser *campid.User
 
 	if login.IsPhone {
-		retrievedUser, retrievedErr = em.Users.ByPhone(ctx, login.Phone)
+		retrievedUser, retrievedErr = auth.Users.ByPhone(ctx, login.Phone)
 	} else {
-		retrievedUser, retrievedErr = em.Users.ByEmail(ctx, login.Email)
+		retrievedUser, retrievedErr = auth.Users.ByEmail(ctx, login.Email)
 	}
 
 	if retrievedErr != nil {
 		return nil, sabuhp.WrapErrWithStatusCode(nerror.Wrap(retrievedErr, "User not found by email or phone"), http.StatusBadRequest, true)
 	}
 
-	if passwordValidErr := em.Passwords.Validate(retrievedUser, login.Password); passwordValidErr != nil {
+	if passwordValidErr := auth.Passwords.Validate(retrievedUser, login.Password); passwordValidErr != nil {
 		return nil, sabuhp.WrapErrWithStatusCode(nerror.Wrap(passwordValidErr, "Invalid user password"), http.StatusBadRequest, true)
 	}
 
-	var userZone, getZoneErr = em.Zones.Get(ctx, retrievedUser.Id)
+	var userZone, getZoneErr = auth.Zones.Get(ctx, retrievedUser.Id)
 	if getZoneErr != nil {
 		return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getZoneErr), http.StatusInternalServerError, true)
 	}
@@ -228,7 +233,7 @@ func (em *Auth) LoginUser(
 		"user_id": retrievedUser.Id,
 	}
 
-	var _, claim, jwtErr = em.Zones.AddJwtSessionToZone(ctx, userZone.Id, userZone.UserId, jwtData)
+	var _, claim, jwtErr = auth.Zones.AddJwtSessionToZone(ctx, userZone.Id, userZone.UserId, jwtData)
 	if jwtErr != nil {
 		return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(jwtErr), http.StatusInternalServerError, true)
 	}
@@ -243,18 +248,50 @@ func (em *Auth) LoginUser(
 	}, nil
 }
 
+func (auth *Auth) FinishLogin(
+	ctx context.Context,
+	msg sabuhp.Message,
+	tr sabuhp.Transport,
+) sabuhp.MessageErr {
+	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.FinishedLoginUserTopic))
+	newCraftedReply.Bytes = []byte(campid.NOT_SUPPORTED)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	// send to reply topic as well
+	newCraftedReply.Topic = msg.Topic.ReplyTopic()
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
+func (auth *Auth) VerifyLogin(
+	ctx context.Context,
+	msg sabuhp.Message,
+	tr sabuhp.Transport,
+) sabuhp.MessageErr {
+	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.FinishedRegistrationTopic))
+	newCraftedReply.Bytes = []byte(campid.NOT_SUPPORTED)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	// send to reply topic as well
+	newCraftedReply.Topic = msg.Topic.ReplyTopic()
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
 type RefreshUserAccess struct {
 	RefreshToken string `json:"refresh_token"`
 }
 
 func (el RefreshUserAccess) Validate() error {
 	if len(el.RefreshToken) == 0 {
-		return nerror.New("RefreshLogin.RefreshToken is required")
+		return nerror.New("RefreshUserAccess.RefreshToken is required")
 	}
 	return nil
 }
 
-func (em *Auth) Refresh(
+func (auth *Auth) RefreshAccess(
 	ctx context.Context,
 	msg sabuhp.Message,
 	tr sabuhp.Transport,
@@ -276,18 +313,18 @@ func (em *Auth) Refresh(
 		}
 	}
 
-	var refreshedDetail, err = em.RefreshLogin(ctx, login)
+	var refreshedDetail, err = auth.RefreshUserAccess(ctx, login)
 	if err != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), err.ShouldAck())
 	}
 
 	var buffer = bufferPool.New().(*bytes.Buffer)
 	defer bufferPool.Put(&buffer)
-	if encodedErr := em.Codec.Encode(buffer, &refreshedDetail); encodedErr != nil {
+	if encodedErr := auth.Codec.Encode(buffer, &refreshedDetail); encodedErr != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
 	}
 
-	var newCraftedReply = msg.ReplyWithTopic(em.RefreshedUserTopic)
+	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.RefreshedUserTopic))
 	newCraftedReply.Bytes = campid.CopyBufferBytes(buffer)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
@@ -307,7 +344,7 @@ type RefreshedLogin struct {
 	AccessExpires  int64
 }
 
-func (em *Auth) RefreshLogin(
+func (auth *Auth) RefreshUserAccess(
 	ctx context.Context,
 	req RefreshUserAccess,
 ) (RefreshedLogin, sabuhp.MessageErr) {
@@ -322,7 +359,7 @@ func (em *Auth) RefreshLogin(
 		return refreshed, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(validateErr), http.StatusBadRequest, true)
 	}
 
-	var claim, claimErr = em.Zones.JwtStore.Refresh(ctx, req.RefreshToken)
+	var claim, claimErr = auth.Zones.JwtStore.Refresh(ctx, req.RefreshToken)
 	if claimErr != nil {
 		return refreshed, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(claimErr), http.StatusBadRequest, true)
 	}
@@ -347,7 +384,7 @@ func (v VerifyAccess) Validate() error {
 	return nil
 }
 
-func (em *Auth) Verify(
+func (auth *Auth) VerifyAccess(
 	ctx context.Context,
 	msg sabuhp.Message,
 	tr sabuhp.Transport,
@@ -375,18 +412,18 @@ func (em *Auth) Verify(
 		}
 	}
 
-	var refreshedDetail, err = em.VerifyAccess(ctx, login)
+	var refreshedDetail, err = auth.VerifyUserAccess(ctx, login)
 	if err != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), err.ShouldAck())
 	}
 
 	var buffer = bufferPool.New().(*bytes.Buffer)
 	defer bufferPool.Put(&buffer)
-	if encodedErr := em.Codec.Encode(buffer, &refreshedDetail); encodedErr != nil {
+	if encodedErr := auth.Codec.Encode(buffer, &refreshedDetail); encodedErr != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
 	}
 
-	var newCraftedReply = msg.ReplyWithTopic(em.VerifiedUserTopic)
+	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.VerifiedUserTopic))
 	newCraftedReply.Bytes = campid.CopyBufferBytes(buffer)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
@@ -402,7 +439,7 @@ type VerifiedAccess struct {
 	ZoneId string
 }
 
-func (em *Auth) VerifyAccess(
+func (auth *Auth) VerifyUserAccess(
 	ctx context.Context,
 	ve VerifyAccess,
 ) (VerifiedAccess, sabuhp.MessageErr) {
@@ -417,7 +454,7 @@ func (em *Auth) VerifyAccess(
 		return vs, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(validateErr), http.StatusBadRequest, true)
 	}
 
-	var claim, _, claimErr = em.Zones.JwtStore.VerifyAccess(ctx, ve.AccessToken)
+	var claim, _, claimErr = auth.Zones.JwtStore.VerifyAccess(ctx, ve.AccessToken)
 	if claimErr != nil {
 		return vs, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(claimErr), http.StatusBadRequest, true)
 	}
@@ -428,12 +465,28 @@ func (em *Auth) VerifyAccess(
 	return vs, nil
 }
 
-func (em *Auth) FinishAuth(
+func (auth *Auth) VerifyRegistration(
 	ctx context.Context,
 	msg sabuhp.Message,
 	tr sabuhp.Transport,
 ) sabuhp.MessageErr {
-	var newCraftedReply = msg.ReplyWithTopic(em.FinishedAuthUserTopic)
+	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.FinishedRegistrationTopic))
+	newCraftedReply.Bytes = []byte(campid.NOT_SUPPORTED)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	// send to reply topic as well
+	newCraftedReply.Topic = msg.Topic.ReplyTopic()
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
+func (auth *Auth) FinishRegistration(
+	ctx context.Context,
+	msg sabuhp.Message,
+	tr sabuhp.Transport,
+) sabuhp.MessageErr {
+	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.FinishedRegistrationTopic))
 	newCraftedReply.Bytes = []byte(campid.NOT_SUPPORTED)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
@@ -455,7 +508,7 @@ func (l LogoutUser) Validate() error {
 	return nil
 }
 
-func (em *Auth) Logout(
+func (auth *Auth) Logout(
 	ctx context.Context,
 	msg sabuhp.Message,
 	tr sabuhp.Transport,
@@ -468,18 +521,18 @@ func (em *Auth) Logout(
 	var lg LogoutUser
 	lg.AccessToken = msg.Params.Get("accessToken")
 
-	var response, err = em.LogoutUser(ctx, lg)
+	var response, err = auth.LogoutUser(ctx, lg)
 	if err != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), err.ShouldAck())
 	}
 
 	var buffer = bufferPool.New().(*bytes.Buffer)
 	defer bufferPool.Put(&buffer)
-	if encodedErr := em.Codec.Encode(buffer, &response); encodedErr != nil {
+	if encodedErr := auth.Codec.Encode(buffer, &response); encodedErr != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
 	}
 
-	var newCraftedReply = msg.ReplyWithTopic(em.LoggedOutUserTopic)
+	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.LoggedOutUserTopic))
 	newCraftedReply.Bytes = campid.CopyBufferBytes(buffer)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
@@ -494,25 +547,25 @@ type LoggedOutUser struct {
 	UserId string
 }
 
-func (em *Auth) LogoutUser(
+func (auth *Auth) LogoutUser(
 	ctx context.Context,
 	lg LogoutUser,
 ) (LoggedOutUser, sabuhp.MessageErr) {
 	var lo LoggedOutUser
 
-	var claim, _, err = em.Zones.JwtStore.AccessTokenToClaim(ctx, lg.AccessToken)
+	var claim, _, err = auth.Zones.JwtStore.AccessTokenToClaim(ctx, lg.AccessToken)
 	if err != nil {
 		return lo, sabuhp.WrapErrWithStatusCode(nerror.Wrap(err, "failed to find access token claim"), http.StatusBadRequest, true)
 	}
 
 	// delete refresh token
-	var _, removeRefreshTokenErr = em.Zones.JwtStore.RemoveRefreshId(ctx, claim.RefreshId.String())
+	var _, removeRefreshTokenErr = auth.Zones.JwtStore.RemoveRefreshId(ctx, claim.RefreshId.String())
 	if removeRefreshTokenErr != nil {
 		return lo, sabuhp.WrapErrWithStatusCode(nerror.Wrap(removeRefreshTokenErr, "failed to find remove access id refresh token"), http.StatusBadRequest, true)
 	}
 
 	// delete related access id
-	var userId, removeAccessErr = em.Zones.JwtStore.RemoveAccessId(ctx, claim.AccessId.String())
+	var userId, removeAccessErr = auth.Zones.JwtStore.RemoveAccessId(ctx, claim.AccessId.String())
 	if removeAccessErr != nil {
 		return lo, sabuhp.WrapErrWithStatusCode(nerror.Wrap(removeAccessErr, "failed to find remove access id"), http.StatusBadRequest, true)
 	}

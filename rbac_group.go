@@ -338,8 +338,20 @@ func (u *GroupStore) Add(ctx context.Context, data Group) (Group, error) {
 }
 
 type GroupService struct {
-	Codec Codec
-	Store *GroupStore
+	Codec  Codec
+	Store  *GroupStore
+	Topics sabuhp.TopicPartial
+}
+
+func (cs *GroupService) RegisterWithBus(bus *sabuhp.BusRelay, serviceGroup string) {
+	bus.Group(GetGroupWithAnyOfRolesTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetGroupsWithAnyOfRoles))
+	bus.Group(GetGroupWithRolesTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetGroupsWithRoles))
+	bus.Group(GetGroupWithRoleTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetGroupsWithRole))
+	bus.Group(GetGroupTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetWithId))
+	bus.Group(GetAllGroupsTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetAll))
+	bus.Group(UpdateGroupTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.UpdateGroup))
+	bus.Group(DeleteGroupTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.RemoveGroupWithId))
+	bus.Group(CreateGroupTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.CreateGroup))
 }
 
 func (cs *GroupService) GetAll(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
@@ -398,6 +410,41 @@ func (cs *GroupService) GetWithId(ctx context.Context, msg sabuhp.Message, tr sa
 	return nil
 }
 
+func (cs *GroupService) CreateGroup(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var readBuffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&readBuffer)
+
+	var update Group
+	if decodedErr := cs.Codec.Decode(readBuffer, &update); decodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(decodedErr), http.StatusBadRequest, true)
+	}
+
+	var createdGroup, updateErr = cs.Store.Add(ctx, update)
+	if updateErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(updateErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, createdGroup); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(GroupCreatedTopic)
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
 func (cs *GroupService) UpdateGroup(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
@@ -421,6 +468,8 @@ func (cs *GroupService) UpdateGroup(ctx context.Context, msg sabuhp.Message, tr 
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
+	newCraftedReply.Topic = cs.Topics(GroupUpdatedTopic)
+	tr.ToBoth(newCraftedReply)
 	return nil
 }
 
@@ -452,6 +501,8 @@ func (cs *GroupService) RemoveGroupWithId(ctx context.Context, msg sabuhp.Messag
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
+	newCraftedReply.Topic = cs.Topics(GroupDeletedTopic)
+	tr.ToBoth(newCraftedReply)
 	return nil
 }
 

@@ -6,7 +6,7 @@ require (
 	github.com/RoaringBitmap/roaring v0.5.5 // indirect
 	github.com/blevesearch/bleve/v2 v2.0.0
 	github.com/dgrijalva/jwt-go v3.2.0+incompatible
-	github.com/ewe-studios/sabuhp v0.6.1
+	github.com/ewe-studios/sabuhp v0.6.2
 	github.com/glycerine/go-unsnap-stream v0.0.0-20190901134440-81cf024a9e0a // indirect
 	github.com/go-redis/redis/v8 v8.4.8
 	github.com/golang/snappy v0.0.2 // indirect

@@ -100,7 +100,7 @@ func TestSessionManager(t *testing.T) {
 	defer indexer.Close()
 
 	var jwtStore = NewJWTStore(config)
-	var sessionStore = NewZoneStore(&JsonSessionCodec{}, sessionStorage)
+	var sessionStore = NewZoneStore(&JsonZoneCodec{Codec: JsonCodec{}}, sessionStorage)
 	var deviceStore = NewDeviceStore(&JsonDeviceCodec{}, deviceStorage, indexer)
 
 	var ctx = context.Background()

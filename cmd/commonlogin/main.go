@@ -57,22 +57,7 @@ func main() {
 	var serviceAddr, _ = envs.GetString(AddrENV)
 	var serviceGroup, _ = envs.GetString(GRP)
 
-	var LogOutUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.LogOutUserTopic)
-	var LoggedOutUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.LoggedOutUserTopic)
-	var LogInUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.LogInUserTopic)
-	var LoggedInUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.LoggedInUserTopic)
-	var RefreshUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.RefreshUserTopic)
-	var RefreshedUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.RefreshedUserTopic)
-	var VerifyUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.VerifyUserTopic)
-	var VerifiedUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.VerifiedUserTopic)
-	var RegisterUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.RegisterUserTopic)
-	var RegisteredUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.RegisteredUserTopic)
-	var FinishAuthUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.FinishAuthUserTopic)
-	var FinishedAuthUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.FinishedAuthUserTopic)
-	//var CreateUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.CreateUserTopic)
-	var CreatedUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.CreatedUserTopic)
-	//var DeleteUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.DeleteUserTopic)
-	var DeletedUserTopic = sabuhp.TRS(serviceEnv, serviceOwner, campid.DeletedUserTopic)
+	var topicMaker = sabuhp.CreateTopicPartial(serviceEnv, serviceOwner)
 
 	var ctx, canceler = context.WithCancel(context.Background())
 	ndaemon.WaiterForKillWithSignal(ndaemon.WaitForKillChan(), canceler)
@@ -141,23 +126,8 @@ func main() {
 	var zoneStore = campid.NewZoneStore(&campid.JsonZoneCodec{Codec: codec}, redisStore)
 
 	var auth commonLogin.Auth
+	auth.Topics = topicMaker
 	auth.Codec = &codec
-	//auth.LogOutUserTopic = LogInUserTopic
-	auth.LoggedOutUserTopic = LoggedOutUserTopic
-	//auth.LogInUserTopic = LogInUserTopic
-	auth.LoggedInUserTopic = LoggedInUserTopic
-	//auth.RefreshUserTopic = RefreshUserTopic
-	auth.RefreshedUserTopic = RefreshedUserTopic
-	//auth.VerifyUserTopic = VerifyUserTopic
-	auth.VerifiedUserTopic = VerifiedUserTopic
-	//auth.RegisterUserTopic = RegisterUserTopic
-	auth.RegisteredUserTopic = RegisteredUserTopic
-	//auth.FinishAuthUserTopic = FinishAuthUserTopic
-	auth.FinishedAuthUserTopic = FinishedAuthUserTopic
-	//auth.CreateUserTopic = CreateUserTopic
-	auth.CreatedUserTopic = CreatedUserTopic
-	//auth.DeleteUserTopic = DeleteUserTopic
-	auth.DeletedUserTopic = DeletedUserTopic
 
 	auth.PhoneValidator = &campid.PhoneValidatorImpl{}
 	auth.EmailValidator = &campid.EmailValidatorImpl{}
@@ -180,12 +150,7 @@ func main() {
 	log.Println("-> Registering listeners")
 
 	// register auth service with bus relay.
-	cs.BusRelay.Group(LogOutUserTopic.String(), serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.Logout))
-	cs.BusRelay.Group(LogInUserTopic.String(), serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.Login))
-	cs.BusRelay.Group(RefreshUserTopic.String(), serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.Refresh))
-	cs.BusRelay.Group(VerifyUserTopic.String(), serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.Verify))
-	cs.BusRelay.Group(RegisterUserTopic.String(), serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.Register))
-	cs.BusRelay.Group(FinishAuthUserTopic.String(), serviceGroup).Listen(sabuhp.TransportResponseFunc(auth.FinishAuth))
+	auth.RegisterWithBusRelay(cs.BusRelay, serviceGroup)
 
 	fmt.Println("-> Starting service")
 	cs.Start()

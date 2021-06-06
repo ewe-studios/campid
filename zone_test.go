@@ -53,7 +53,7 @@ func TestZoneStore(t *testing.T) {
 		sz.Method = "mobile-client"
 		require.NoError(t, sessionStore.Update(ctx, &sz))
 
-		var record, retreivedErr = sessionStore.GetById(ctx, sz.Id, sz.UserId)
+		var record, retreivedErr = sessionStore.GetByZoneAndUserId(ctx, sz.Id, sz.UserId)
 		require.NoError(t, retreivedErr)
 		require.Equal(t, record.UserId, sz.UserId)
 		require.Equal(t, "mobile-client", record.Method)
@@ -85,7 +85,7 @@ func TestZoneStore(t *testing.T) {
 		require.NoError(t, getListErr)
 		require.Len(t, recordList, 2)
 	})
-	t.Run("GetOneForUser", func(t *testing.T) {
+	t.Run("GetForUserId", func(t *testing.T) {
 		store.Clear()
 
 		require.NoError(t, sessionStore.Save(ctx, &sz))
@@ -94,7 +94,7 @@ func TestZoneStore(t *testing.T) {
 		require.NoError(t, hasRecordErr)
 		require.True(t, hasRecord)
 
-		var record, getListErr = sessionStore.GetOneForUser(ctx, sz.UserId)
+		var record, getListErr = sessionStore.GetForUserId(ctx, sz.UserId)
 		require.NoError(t, getListErr)
 		require.NotNil(t, record)
 		require.Equal(t, record.UserId, sz.UserId)

@@ -105,7 +105,7 @@ func TestJwtManufacturer(t *testing.T) {
 		require.Equal(t, "2", verifiedClaim.Data["day"])
 	})
 
-	t.Run("VerifyAccess", func(t *testing.T) {
+	t.Run("VerifyUserAccess", func(t *testing.T) {
 		store.Clear()
 
 		var claim, err = manager.Create(ctx, mySessionId, myUser, nil)
@@ -122,7 +122,7 @@ func TestJwtManufacturer(t *testing.T) {
 		require.Equal(t, claim.RefreshId, verifiedClaim.RefreshId)
 	})
 
-	t.Run("Refresh", func(t *testing.T) {
+	t.Run("RefreshAccess", func(t *testing.T) {
 		store.Clear()
 
 		var claim, err = manager.Create(ctx, mySessionId, myUser, nil)

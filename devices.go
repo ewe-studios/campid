@@ -749,8 +749,24 @@ func escapeIP(ip string) string {
 }
 
 type DeviceService struct {
-	Codec Codec
-	Store *DeviceStore
+	Codec  Codec
+	Store  *DeviceStore
+	Topics sabuhp.TopicPartial
+}
+
+func (cs *DeviceService) RegisterWithBus(bus *sabuhp.BusRelay, serviceGroup string) {
+	bus.Group(GetDevicesForCityTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetDevicesWithCity))
+	bus.Group(GetDevicesForUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetDevicesForUser))
+	bus.Group(GetDevicesForCityAndIpTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetDevicesWithCityAndIp))
+	bus.Group(GetDevicesForZoneTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetDevicesForZoneId))
+	bus.Group(GetAllDevicesTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetAll))
+	bus.Group(GetDeviceTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetDevice))
+	bus.Group(UpdateDeviceTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.UpdateDevice))
+	bus.Group(DisableDeviceTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.DisableDevice))
+	bus.Group(EnableDeviceTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.EnableDevice))
+	bus.Group(CreateDeviceTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.CreateDevice))
+	bus.Group(RemoveDeviceTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.DeleteDevice))
+	bus.Group(RemoveDevicesForZoneTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.DeleteDevicesForZoneId))
 }
 
 func (cs *DeviceService) GetAll(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
@@ -959,9 +975,82 @@ func (cs *DeviceService) DeleteDevice(ctx context.Context, msg sabuhp.Message, t
 
 	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
 	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.Params.Set("deviceId", deviceId)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
+	newCraftedReply.Topic = cs.Topics(DeviceRemovedTopic)
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
+func (cs *DeviceService) UpdateDevice(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var readBuffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&readBuffer)
+
+	var update Device
+	if decodedErr := cs.Codec.Decode(readBuffer, &update); decodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(decodedErr), http.StatusBadRequest, true)
+	}
+
+	var createdGroup, updateErr = cs.Store.Update(ctx, &update)
+	if updateErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(updateErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, createdGroup); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(DeviceUpdatedTopic)
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
+func (cs *DeviceService) CreateDevice(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var readBuffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&readBuffer)
+
+	var update DeviceInfo
+	if decodedErr := cs.Codec.Decode(readBuffer, &update); decodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(decodedErr), http.StatusBadRequest, true)
+	}
+
+	var createdGroup, updateErr = cs.Store.Create(ctx, update)
+	if updateErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(updateErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, createdGroup); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(DeviceCreatedTopic)
+	tr.ToBoth(newCraftedReply)
 	return nil
 }
 
@@ -983,9 +1072,12 @@ func (cs *DeviceService) DeleteDevicesForZoneId(ctx context.Context, msg sabuhp.
 	}
 
 	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Params.Set("zoneId", zoneId)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
+	newCraftedReply.Topic = cs.Topics(DevicesRemovedTopic)
+	tr.ToBoth(newCraftedReply)
 	return nil
 }
 
@@ -1017,5 +1109,86 @@ func (cs *DeviceService) GetDevice(ctx context.Context, msg sabuhp.Message, tr s
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
+	return nil
+}
+
+func (cs *DeviceService) DisableDevice(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var deviceId = msg.Params.Get("deviceId")
+	if len(deviceId) == 0 {
+		var getAllErr = nerror.New("deviceId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.GetDevice(ctx, deviceId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	record.IsEnabled = false
+
+	var updatedRecord, updateErr = cs.Store.Update(ctx, record)
+	if updateErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(updateErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, updatedRecord); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(DeviceDisabledTopic)
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *DeviceService) EnableDevice(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var deviceId = msg.Params.Get("deviceId")
+	if len(deviceId) == 0 {
+		var getAllErr = nerror.New("deviceId param not found")
+		return sabuhp.WrapErrWithStatusCode(getAllErr, http.StatusBadRequest, false)
+	}
+
+	var record, getAllErr = cs.Store.GetDevice(ctx, deviceId)
+	if getAllErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getAllErr), http.StatusInternalServerError, false)
+	}
+
+	record.IsEnabled = true
+
+	var updatedRecord, updateErr = cs.Store.Update(ctx, record)
+	if updateErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(updateErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, updatedRecord); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(DeviceEnabledTopic)
+	tr.ToBoth(newCraftedReply)
 	return nil
 }
