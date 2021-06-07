@@ -347,6 +347,12 @@ type ZoneService struct {
 	Topics sabuhp.TopicPartial
 }
 
+func (cs *ZoneService) Register(bus *sabuhp.BusRelay, serviceGroup string) {
+	bus.Group(CreateZoneTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.CreateZone))
+	bus.Group(UpdateZoneTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.UpdateZone))
+	bus.Group(DeleteZoneTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.RemoveUserZone))
+}
+
 func (cs *ZoneService) GetAll(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {

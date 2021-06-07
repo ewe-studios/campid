@@ -334,17 +334,23 @@ func (u *RoleStore) Add(ctx context.Context, data Role) (Role, error) {
 }
 
 type RoleService struct {
-	Codec Codec
-	Store *RoleStore
-
-	RoleRemoved sabuhp.Topic
-	RoleCreated sabuhp.Topic
-	RoleUpdated sabuhp.Topic
+	Codec       Codec
+	Store       *RoleStore
+	ActionStore *ActionStore
+	Topics      sabuhp.TopicPartial
 }
 
 func (cs *RoleService) RegisterWithBus(bus *sabuhp.BusRelay, serviceGroup string) {
+	bus.Group(DeleteRoleActionTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.DeleteActionRole))
+	bus.Group(CreateRoleActionTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.CreateActionRole))
+	bus.Group(GetAllRoleActionTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetAllActionRole))
+
+	bus.Group(DeleteRoleTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.RemoveRoleWithId))
+	bus.Group(CreateRoleTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.CreateRole))
+	bus.Group(UpdateRoleTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.UpdateRole))
 	bus.Group(GetRoleTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetWithId))
 	bus.Group(GetAllRolesTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetAll))
+	bus.Group(GetRoleWithActionTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetRoleWithAction))
 	bus.Group(GetRolesWithActionsTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetRolesWithActions))
 	bus.Group(GetRolesWithAnyActionTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetRolesWithAnyActions))
 }
@@ -435,7 +441,7 @@ func (cs *RoleService) CreateRole(ctx context.Context, msg sabuhp.Message, tr sa
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
-	newCraftedReply.Topic = cs.RoleCreated
+	newCraftedReply.Topic = cs.Topics(RoleCreatedTopic)
 	tr.ToBoth(newCraftedReply)
 	return nil
 }
@@ -460,11 +466,11 @@ func (cs *RoleService) UpdateRole(ctx context.Context, msg sabuhp.Message, tr sa
 	}
 
 	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Params.Set("roleId", update.Id)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
-	newCraftedReply.Topic = cs.RoleUpdated
-	newCraftedReply.Params.Set("roleId", update.Id)
+	newCraftedReply.Topic = cs.Topics(RoleUpdatedTopic)
 	tr.ToBoth(newCraftedReply)
 	return nil
 }
@@ -493,12 +499,12 @@ func (cs *RoleService) RemoveRoleWithId(ctx context.Context, msg sabuhp.Message,
 	}
 
 	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Params.Set("roleId", id)
 	newCraftedReply.Bytes = CopyBufferBytes(buffer)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
-	newCraftedReply.Topic = cs.RoleRemoved
-	newCraftedReply.Params.Set("roleId", id)
+	newCraftedReply.Topic = cs.Topics(RoleDeletedTopic)
 	tr.ToBoth(newCraftedReply)
 	return nil
 }
@@ -621,5 +627,85 @@ func (cs *RoleService) GetRolesWithActions(ctx context.Context, msg sabuhp.Messa
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
+	return nil
+}
+
+func (cs *RoleService) CreateActionRole(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var readBuffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&readBuffer)
+
+	var action = ActionPolicy(msg.Bytes)
+
+	var updateErr = cs.ActionStore.Create(ctx, action)
+	if updateErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(updateErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Params.Set("action", action.String())
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(RoleActionCreatedTopic)
+	tr.ToBoth(newCraftedReply)
+	return nil
+}
+
+func (cs *RoleService) GetAllActionRole(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var readBuffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&readBuffer)
+
+	var records, getErr = cs.ActionStore.All(ctx)
+	if getErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getErr), http.StatusInternalServerError, false)
+	}
+
+	var buffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&buffer)
+	if encodedErr := cs.Codec.Encode(buffer, records); encodedErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(encodedErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Bytes = CopyBufferBytes(buffer)
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	return nil
+}
+
+func (cs *RoleService) DeleteActionRole(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	var readBuffer = bufferPool.New().(*bytes.Buffer)
+	defer bufferPool.Put(&readBuffer)
+
+	var action = ActionPolicy(msg.Bytes)
+
+	var updateErr = cs.ActionStore.Delete(ctx, action)
+	if updateErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(updateErr), http.StatusInternalServerError, false)
+	}
+
+	var newCraftedReply = msg.ReplyWithTopic(msg.Topic.ReplyTopic())
+	newCraftedReply.Params.Set("action", action.String())
+	newCraftedReply.SuggestedStatusCode = http.StatusOK
+	tr.ToBoth(newCraftedReply)
+
+	newCraftedReply.Topic = cs.Topics(RoleActionDeletedTopic)
+	tr.ToBoth(newCraftedReply)
 	return nil
 }

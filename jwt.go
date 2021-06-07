@@ -1047,6 +1047,12 @@ type JwtService struct {
 	Topics sabuhp.TopicPartial
 }
 
+func (cs *JwtService) RegisterBus(bus *sabuhp.BusRelay, serviceGroup string) {
+	bus.Group(GetAllJwtForZoneTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetAllForZone))
+	bus.Group(DeleteAllJwtForZoneTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.DeleteAllForZone))
+	bus.Group(DeleteJwtForZoneTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.DeleteJwtId))
+}
+
 func (cs *JwtService) GetAllForZone(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {

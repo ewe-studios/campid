@@ -24,11 +24,10 @@ const (
 
 // Jwt service events
 const (
-	AddedJwtTopic     = "campid.jwt.deletedJwt"
-	DisabledJwtTopic  = "campid.jwt.disabledJwt"
-	DeletedJwtTopic   = "campid.jwt.deletedJwt"
-	ExpiredJwtTopic   = "campid.jwt.expiredJwt"
-	RefreshedJwtTopic = "campid.jwt.refreshedJwt"
+	GetAllJwtForZoneTopic    = "campid.jwt.getAllJwtForZone"
+	DeletedJwtTopic          = "campid.jwt.deletedJwt"
+	DeleteAllJwtForZoneTopic = "campid.jwt.deleteAllJwtForZone"
+	DeleteJwtForZoneTopic    = "campid.jwt.deleteJwtForZone"
 )
 
 // Device service events
@@ -53,14 +52,6 @@ const (
 	GetDevicesForCityAndIpTopic = "campid.devices.getDevicesForCityAndIp"
 )
 
-// Action service events
-const (
-	CreateActionTopic  = "campid.actions.createAction"
-	ActionCreatedTopic = "campid.actions.createdAction"
-	DeleteActionTopic  = "campid.actions.deleteAction"
-	ActionDeletedTopic = "campid.actions.deletedAction"
-)
-
 // Role service events
 const (
 	CreateRoleTopic            = "campid.roles.createRole"
@@ -74,6 +65,11 @@ const (
 	GetRoleWithActionTopic     = "campid.roles.getRoleWithAction"
 	GetRolesWithActionsTopic   = "campid.roles.getRolesWithAction"
 	GetRolesWithAnyActionTopic = "campid.roles.getRolesWithAnyAction"
+	GetAllRoleActionTopic      = "campid.roles.actions.createAction"
+	CreateRoleActionTopic      = "campid.roles.actions.createAction"
+	RoleActionCreatedTopic     = "campid.roles.actions.createdAction"
+	DeleteRoleActionTopic      = "campid.roles.actions.deleteAction"
+	RoleActionDeletedTopic     = "campid.roles.actions.deletedAction"
 )
 
 // Group service events
@@ -103,10 +99,11 @@ const (
 
 // User service events
 const (
-	CreateUserTopic  = "campid.users.createUser"
-	UserCreatedTopic = "campid.users.createdUser"
-	UpdateUserTopic  = "campid.users.updateUser"
-	UserUpdatedTopic = "campid.users.updatedUser"
-	DeleteUserTopic  = "campid.users.deleteUser"
-	DeletedUserTopic = "campid.users.deletedUser"
+	CreateUserTopic      = "campid.users.createUser"
+	UserCreatedTopic     = "campid.users.createdUser"
+	UpdateUserTopic      = "campid.users.updateUser"
+	UserUpdatedTopic     = "campid.users.updatedUser"
+	DeleteUserTopic      = "campid.users.deleteUser"
+	DeleteUserByPidTopic = "campid.users.deleteUserByPid"
+	DeletedUserTopic     = "campid.users.deletedUser"
 )

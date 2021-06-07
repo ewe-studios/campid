@@ -646,6 +646,13 @@ type UserService struct {
 	Topics sabuhp.TopicPartial
 }
 
+func (cs *UserService) RegisterBus(bus *sabuhp.BusRelay, serviceGroup string) {
+	bus.Group(CreateUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.CreateUser))
+	bus.Group(UpdateUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.UpdateUser))
+	bus.Group(DeleteUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.RemoveUserById))
+	bus.Group(DeleteUserByPidTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.RemoveUserByPid))
+}
+
 func (cs *UserService) GetAll(ctx context.Context, msg sabuhp.Message, tr sabuhp.Transport) sabuhp.MessageErr {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
