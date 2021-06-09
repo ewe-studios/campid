@@ -1,25 +1,29 @@
 package campid
 
 const (
-	NOT_SUPPORTED = "NOT SUPPORTED"
+	NotSupported = "NOT SUPPORTED"
 )
 
 // Auth manager events
 const (
-	LogOutUserTopic           = "campid.users.logOutUser"
-	LoggedOutUserTopic        = "campid.users.loggedOutUser"
-	LogInUserTopic            = "campid.users.logInUser"
-	LoggedInUserTopic         = "campid.users.loggedInUser"
-	RefreshUserTopic          = "campid.users.refreshUser"
-	RefreshedUserTopic        = "campid.users.refreshedUser"
-	VerifyUserTopic           = "campid.users.verifyUser"
-	VerifiedUserTopic         = "campid.users.verifiedUser"
-	RegisterUserTopic         = "campid.users.registerUser"
-	RegisteredUserTopic       = "campid.users.registeredUser"
-	FinishLoginUserTopic      = "campid.users.finishUserAuth"
-	FinishedLoginUserTopic    = "campid.users.finishedUserAuth"
-	FinishRegistrationTopic   = "campid.users.finishRegistration"
-	FinishedRegistrationTopic = "campid.users.finishedRegistration"
+	LogOutUserTopic                   = "campid.users.logOutUser"
+	LoggedOutUserTopic                = "campid.users.loggedOutUser"
+	LogInUserTopic                    = "campid.users.logInUser"
+	LoggedInUserTopic                 = "campid.users.loggedInUser"
+	RefreshUserTopic                  = "campid.users.refreshUser"
+	RefreshedUserTopic                = "campid.users.refreshedUser"
+	VerifyUserTopic                   = "campid.users.verifyUser"
+	VerifiedUserTopic                 = "campid.users.verifiedUser"
+	RegisterUserTopic                 = "campid.users.registerUser"
+	RegisteredUserTopic               = "campid.users.registeredUser"
+	FinishLoginUserTopic              = "campid.users.finishUserAuth"
+	FinishedLoginUserTopic            = "campid.users.finishedUserAuth"
+	FinishRegistrationTopic           = "campid.users.finishRegistration"
+	FinishedRegistrationTopic         = "campid.users.finishedRegistration"
+	SendRegistrationVerificationTopic = "campid.users.sendRegistrationVerificationTopic"
+	SentRegistrationVerificationTopic = "campid.users.sentRegistrationVerificationTopic"
+	SendLoginVerificationTopic        = "campid.users.sendLoginVerificationTopic"
+	SentLoginVerificationTopic        = "campid.users.sentLoginVerificationTopic"
 )
 
 // Jwt service events
