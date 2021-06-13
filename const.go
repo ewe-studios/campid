@@ -103,6 +103,8 @@ const (
 
 // User service events
 const (
+	GetUserTopic         = "campid.users.getUser"
+	GetAllUsersTopic     = "campid.users.getAllUsers"
 	CreateUserTopic      = "campid.users.createUser"
 	UserCreatedTopic     = "campid.users.createdUser"
 	UpdateUserTopic      = "campid.users.updateUser"

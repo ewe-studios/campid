@@ -119,6 +119,16 @@ type Device struct {
 	Updated       time.Time
 }
 
+func (d Device) IsForUser(u *User) bool {
+	if len(d.UserId) == 0 {
+		return false
+	}
+	if u.Id == d.UserId {
+		return true
+	}
+	return false
+}
+
 func (d Device) Key() string {
 	return strings.Join([]string{d.ZoneId, d.Id}, dot)
 }
@@ -189,11 +199,6 @@ func (ds *DeviceStore) Create(
 		defer span.Finish()
 	}
 
-	var device, getDeviceErr = ds.GetDeviceWithIPAndCity(ctx, info.IP.String(), info.Location.City, info.FingerprintId)
-	if getDeviceErr == nil {
-		return device, nil
-	}
-
 	var d Device
 	d.Id = nxid.New().String()
 	d.Agent = info.Agent
@@ -223,6 +228,28 @@ func (ds *DeviceStore) Create(
 	}
 
 	return &d, nil
+}
+
+func (ds *DeviceStore) GetDeviceFromDeviceInfo(ctx context.Context, info DeviceInfo) (*Device, error) {
+	var span openTracing.Span
+	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
+		defer span.Finish()
+	}
+
+	if len(info.FingerprintId) != 0 {
+		var deviceFromFingerprint, getDeviceFromFingerprintErr = ds.GetDeviceWithFingerprint(ctx, info.FingerprintId)
+		if getDeviceFromFingerprintErr != nil {
+			return nil, nerror.WrapOnly(getDeviceFromFingerprintErr)
+		}
+		return deviceFromFingerprint, nil
+	}
+
+	var device, getDeviceErr = ds.GetDeviceWithIPAndCity(ctx, info.IP.String(), info.Location.City, info.FingerprintId)
+	if getDeviceErr == nil {
+		return device, nil
+	}
+
+	return nil, nerror.New("device not found", info)
 }
 
 func (ds *DeviceStore) RemoveAllDevicesForZoneId(ctx context.Context, zoneId string) error {

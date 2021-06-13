@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -29,7 +28,8 @@ type Auth struct {
 	PhoneValidator    campid.PhoneValidator
 	EmailValidator    campid.EmailValidator
 	RegistrationCodes *campid.AuthCodes
-	LoginCodes        *campid.AuthCodes
+	LoginCodes        *campid.DeviceAuthCodes
+	Devices           *campid.DeviceStore
 	Passwords         *campid.Password
 	Users             *campid.UserStore
 	Zones             *campid.UserZoneManager
@@ -76,7 +76,7 @@ func (auth *Auth) Register(
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), true)
 	}
 
-	var userObjectForPublic = user.PublicSafeUser()
+	var userObjectForPublic = user.User.PublicSafeUser()
 	var encodedUserDataWriter = bufferPool.New().(*bytes.Buffer)
 	defer bufferPool.Put(&encodedUserDataWriter)
 	encodedUserDataWriter.Reset()
@@ -97,34 +97,46 @@ func (auth *Auth) Register(
 	return nil
 }
 
+type UserZone struct {
+	User *campid.User
+	Zone *campid.Zone
+}
+
 func (auth *Auth) RegisterUser(
 	ctx context.Context,
 	newUser campid.NewUser,
-) (*campid.User, sabuhp.MessageErr) {
+) (UserZone, sabuhp.MessageErr) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()
 	}
 
+	var uz UserZone
+
 	var createdUser, failedCreateUserErr = auth.Users.Register(ctx, newUser)
 	if failedCreateUserErr != nil {
-		return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(failedCreateUserErr), http.StatusInternalServerError, false)
+		return uz, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(failedCreateUserErr), http.StatusInternalServerError, false)
 	}
 
 	var sessionData = map[string]string{}
 	sessionData["email"] = createdUser.Email
 
-	var _, createZoneErr = auth.Zones.CreateZone(ctx, createdUser.Id, "api", sessionData)
+	var zone, createZoneErr = auth.Zones.CreateZone(ctx, createdUser.Id, "api", sessionData)
 	if createZoneErr != nil {
-		return nil, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(createZoneErr), http.StatusInternalServerError, false)
+		return uz, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(createZoneErr), http.StatusInternalServerError, false)
 	}
+
+	sessionData["zoneId"] = zone.Id
+
+	uz.User = createdUser
+	uz.Zone = zone
 
 	// send verification code for user
 	if sendErr := auth.RegistrationCodes.SendCode(ctx, createdUser); sendErr != nil {
-		return createdUser, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(sendErr), http.StatusInternalServerError, false)
+		return uz, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(sendErr), http.StatusInternalServerError, false)
 	}
 
-	return createdUser, nil
+	return uz, nil
 }
 
 func (auth *Auth) VerifyRegistration(
@@ -137,34 +149,21 @@ func (auth *Auth) VerifyRegistration(
 		defer span.Finish()
 	}
 
-	var login VerifyAccess
-	var authorizationHeader = strings.TrimPrefix(msg.Headers.Get("Authorization"), "Bearer")
-	login.AccessToken = strings.TrimSpace(authorizationHeader)
-
-	if len(login.AccessToken) == 0 {
-		login.AccessToken = msg.Params.Get("accessToken")
+	var userId = msg.Params.Get("userId")
+	if len(userId) == 0 {
+		return sabuhp.WrapErrWithStatusCode(nerror.New("userId is required"), http.StatusBadRequest, true)
+	}
+	var authCode = msg.Params.Get("regCode")
+	if len(authCode) == 0 {
+		return sabuhp.WrapErrWithStatusCode(nerror.New("regCode is required"), http.StatusBadRequest, true)
 	}
 
-	if len(login.AccessToken) == 0 {
-		for _, cookie := range msg.Cookies {
-			if cookie.Name == "accessToken" {
-				login.AccessToken = cookie.Value
-				break
-			}
-		}
-	}
-
-	var refreshedDetail, err = auth.VerifyUserAccess(ctx, login)
-	if err != nil {
-		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), err.ShouldAck())
-	}
-
-	var currentUser, getUserErr = auth.Users.ById(ctx, refreshedDetail.UserId)
+	var currentUser, getUserErr = auth.Users.ById(ctx, userId)
 	if getUserErr != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getUserErr), http.StatusInternalServerError, false)
 	}
 
-	var sendErr = auth.RegistrationCodes.SendCode(ctx, currentUser)
+	var sendErr = auth.RegistrationCodes.VerifyCode(ctx, currentUser, authCode)
 	if sendErr != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(sendErr), http.StatusInternalServerError, false)
 	}
@@ -189,8 +188,35 @@ func (auth *Auth) FinishRegistration(
 		defer span.Finish()
 	}
 
+	var authenticationUser = msg.Params.Get("userId")
+	if len(authenticationUser) == 0 {
+		return sabuhp.WrapErrWithStatusCode(
+			nerror.New("userId param is required"),
+			http.StatusBadRequest,
+			true,
+		)
+	}
+
+	var user, getUserErr = auth.Users.ById(ctx, authenticationUser)
+	if getUserErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getUserErr), http.StatusBadRequest, true)
+	}
+
+	var authenticationCode = msg.Params.Get("authCode")
+	if len(authenticationCode) == 0 {
+		return sabuhp.WrapErrWithStatusCode(
+			nerror.New("authCode param is required"),
+			http.StatusBadRequest,
+			true,
+		)
+	}
+
+	var authErr = auth.RegistrationCodes.VerifyCode(ctx, user, authenticationCode)
+	if authErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(authErr), http.StatusBadRequest, true)
+	}
+
 	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.FinishedRegistrationTopic))
-	newCraftedReply.Bytes = []byte(campid.NotSupported)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
 	tr.ToBoth(newCraftedReply)
 
@@ -232,6 +258,19 @@ func (auth *Auth) Login(
 		defer span.Finish()
 	}
 
+	var deviceInfo, getDeviceInfoErr = campid.ExtractDeviceInfo(&msg)
+	if getDeviceInfoErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getDeviceInfoErr), http.StatusBadRequest, true)
+	}
+
+	var device, getDeviceErr = auth.Devices.GetDeviceFromDeviceInfo(ctx, deviceInfo)
+	if getDeviceErr != nil {
+		device, getDeviceErr = auth.Devices.Create(ctx, deviceInfo)
+		if getDeviceErr != nil {
+			return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getDeviceErr), http.StatusBadRequest, true)
+		}
+	}
+
 	var login Login
 	var decodeErr = auth.Codec.Decode(bytes.NewReader(msg.Bytes), &login)
 	if decodeErr != nil {
@@ -241,6 +280,11 @@ func (auth *Auth) Login(
 	var user, err = auth.LoginUser(ctx, login)
 	if err != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), false)
+	}
+
+	// send code to user's desired auth point
+	if sendCodeErr := auth.LoginCodes.SendCode(ctx, &user.User, device); sendCodeErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(decodeErr), http.StatusBadRequest, false)
 	}
 
 	var buffer = bufferPool.New().(*bytes.Buffer)
@@ -351,10 +395,12 @@ func (auth *Auth) Logout(
 		defer span.Finish()
 	}
 
-	var lg LogoutUser
-	lg.AccessToken = msg.Params.Get("accessToken")
+	var vauth, authErr = campid.ExtractJwtAuth(&msg)
+	if authErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(authErr), http.StatusBadRequest, true)
+	}
 
-	var response, err = auth.LogoutUser(ctx, lg)
+	var response, err = auth.LogoutUser(ctx, vauth)
 	if err != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), err.ShouldAck())
 	}
@@ -382,7 +428,7 @@ type LoggedOutUser struct {
 
 func (auth *Auth) LogoutUser(
 	ctx context.Context,
-	lg LogoutUser,
+	lg campid.VerifyAccess,
 ) (LoggedOutUser, sabuhp.MessageErr) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
@@ -433,26 +479,27 @@ func (auth *Auth) VerifyLogin(
 		defer span.Finish()
 	}
 
-	var login VerifyAccess
-	var authorizationHeader = strings.TrimPrefix(msg.Headers.Get("Authorization"), "Bearer")
-	login.AccessToken = strings.TrimSpace(authorizationHeader)
-
-	if len(login.AccessToken) == 0 {
-		login.AccessToken = msg.Params.Get("accessToken")
+	var vauth, authErr = campid.ExtractJwtAuth(&msg)
+	if authErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(authErr), http.StatusBadRequest, true)
 	}
 
-	if len(login.AccessToken) == 0 {
-		for _, cookie := range msg.Cookies {
-			if cookie.Name == "accessToken" {
-				login.AccessToken = cookie.Value
-				break
-			}
-		}
-	}
-
-	var refreshedDetail, err = auth.VerifyUserAccess(ctx, login)
+	var refreshedDetail, err = auth.VerifyUserAccess(ctx, vauth)
 	if err != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), err.ShouldAck())
+	}
+
+	var deviceInfo, getDeviceInfoErr = campid.ExtractDeviceInfo(&msg)
+	if getDeviceInfoErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getDeviceInfoErr), http.StatusBadRequest, true)
+	}
+
+	var device, getDeviceErr = auth.Devices.GetDeviceFromDeviceInfo(ctx, deviceInfo)
+	if getDeviceErr != nil {
+		device, getDeviceErr = auth.Devices.Create(ctx, deviceInfo)
+		if getDeviceErr != nil {
+			return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getDeviceErr), http.StatusBadRequest, true)
+		}
 	}
 
 	var currentUser, getUserErr = auth.Users.ById(ctx, refreshedDetail.UserId)
@@ -460,7 +507,7 @@ func (auth *Auth) VerifyLogin(
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getUserErr), http.StatusInternalServerError, false)
 	}
 
-	var sendErr = auth.LoginCodes.SendCode(ctx, currentUser)
+	var sendErr = auth.LoginCodes.SendCode(ctx, currentUser, device)
 	if sendErr != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(sendErr), http.StatusInternalServerError, false)
 	}
@@ -485,6 +532,44 @@ func (auth *Auth) FinishLogin(
 		defer span.Finish()
 	}
 
+	var authCode = msg.Params.Get("authCode")
+	if len(authCode) == 0 {
+		return sabuhp.WrapErrWithStatusCode(nerror.New("authCode is required"), http.StatusBadRequest, true)
+	}
+
+	var vauth, authErr = campid.ExtractJwtAuth(&msg)
+	if authErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(authErr), http.StatusBadRequest, true)
+	}
+
+	var refreshedDetail, err = auth.VerifyUserAccess(ctx, vauth)
+	if err != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), err.ShouldAck())
+	}
+
+	var currentUser, getUserErr = auth.Users.ById(ctx, refreshedDetail.UserId)
+	if getUserErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getUserErr), http.StatusInternalServerError, false)
+	}
+
+	var deviceInfo, getDeviceInfoErr = campid.ExtractDeviceInfo(&msg)
+	if getDeviceInfoErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getDeviceInfoErr), http.StatusBadRequest, true)
+	}
+
+	var device, getDeviceErr = auth.Devices.GetDeviceFromDeviceInfo(ctx, deviceInfo)
+	if getDeviceErr != nil {
+		device, getDeviceErr = auth.Devices.Create(ctx, deviceInfo)
+		if getDeviceErr != nil {
+			return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(getDeviceErr), http.StatusBadRequest, true)
+		}
+	}
+
+	var sendErr = auth.LoginCodes.VerifyCode(ctx, currentUser, device, authCode)
+	if sendErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(sendErr), http.StatusInternalServerError, false)
+	}
+
 	var newCraftedReply = msg.ReplyWithTopic(auth.Topics(campid.FinishedLoginUserTopic))
 	newCraftedReply.Bytes = []byte(campid.NotSupported)
 	newCraftedReply.SuggestedStatusCode = http.StatusOK
@@ -500,13 +585,6 @@ type VerifyAccess struct {
 	AccessToken string
 }
 
-func (v VerifyAccess) Validate() error {
-	if len(v.AccessToken) == 0 {
-		return nerror.New("VerifiedAccess.AccessToken is required")
-	}
-	return nil
-}
-
 func (auth *Auth) VerifyAccess(
 	ctx context.Context,
 	msg sabuhp.Message,
@@ -517,25 +595,12 @@ func (auth *Auth) VerifyAccess(
 		defer span.Finish()
 	}
 
-	var login VerifyAccess
-
-	var authorizationHeader = strings.TrimPrefix(msg.Headers.Get("Authorization"), "Bearer")
-	login.AccessToken = strings.TrimSpace(authorizationHeader)
-
-	if len(login.AccessToken) == 0 {
-		login.AccessToken = msg.Params.Get("accessToken")
+	var vauth, authErr = campid.ExtractJwtAuth(&msg)
+	if authErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(authErr), http.StatusBadRequest, true)
 	}
 
-	if len(login.AccessToken) == 0 {
-		for _, cookie := range msg.Cookies {
-			if cookie.Name == "accessToken" {
-				login.AccessToken = cookie.Value
-				break
-			}
-		}
-	}
-
-	var refreshedDetail, err = auth.VerifyUserAccess(ctx, login)
+	var refreshedDetail, err = auth.VerifyUserAccess(ctx, vauth)
 	if err != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), err.ShouldAck())
 	}
@@ -564,7 +629,7 @@ type VerifiedAccess struct {
 
 func (auth *Auth) VerifyUserAccess(
 	ctx context.Context,
-	ve VerifyAccess,
+	ve campid.VerifyAccess,
 ) (VerifiedAccess, sabuhp.MessageErr) {
 	var vs VerifiedAccess
 
@@ -573,7 +638,7 @@ func (auth *Auth) VerifyUserAccess(
 		defer span.Finish()
 	}
 
-	if validateErr := ve.Validate(); validateErr != nil {
+	if validateErr := ve.ValidateAccess(); validateErr != nil {
 		return vs, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(validateErr), http.StatusBadRequest, true)
 	}
 
@@ -609,19 +674,12 @@ func (auth *Auth) RefreshAccess(
 		defer span.Finish()
 	}
 
-	var login RefreshUserAccess
-	login.RefreshToken = msg.Params.Get("refreshToken")
-
-	if len(login.RefreshToken) == 0 {
-		for _, cookie := range msg.Cookies {
-			if cookie.Name == "refreshToken" {
-				login.RefreshToken = cookie.Value
-				break
-			}
-		}
+	var vauth, authErr = campid.ExtractJwtAuth(&msg)
+	if authErr != nil {
+		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(authErr), http.StatusBadRequest, true)
 	}
 
-	var refreshedDetail, err = auth.RefreshUserAccess(ctx, login)
+	var refreshedDetail, err = auth.RefreshUserAccess(ctx, vauth)
 	if err != nil {
 		return sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(err), err.StatusCode(), err.ShouldAck())
 	}
@@ -654,7 +712,7 @@ type RefreshedLogin struct {
 
 func (auth *Auth) RefreshUserAccess(
 	ctx context.Context,
-	req RefreshUserAccess,
+	req campid.VerifyAccess,
 ) (RefreshedLogin, sabuhp.MessageErr) {
 	var refreshed RefreshedLogin
 
@@ -663,7 +721,7 @@ func (auth *Auth) RefreshUserAccess(
 		defer span.Finish()
 	}
 
-	if validateErr := req.Validate(); validateErr != nil {
+	if validateErr := req.ValidateRefresh(); validateErr != nil {
 		return refreshed, sabuhp.WrapErrWithStatusCode(nerror.WrapOnly(validateErr), http.StatusBadRequest, true)
 	}
 

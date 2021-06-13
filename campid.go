@@ -9,9 +9,12 @@ import (
 )
 
 const (
-	UserAgentHeader  = "User-Agent"
-	DeviceCookieName = "SABU_DeviceCookie"
-	DeviceHeaderName = "X-SABU-Device"
+	AuthHeader                  = "Authorization"
+	RefreshHeader               = "REFRESH-HEADER"
+	UserAgentHeader             = "User-Agent"
+	DeviceCookieName            = "SABU_DeviceCookie"
+	DeviceFingerprintCookieName = "Fingerprint"
+	DeviceHeaderName            = "X-SABU-Device"
 )
 
 type Mail struct {

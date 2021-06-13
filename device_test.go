@@ -41,7 +41,7 @@ func TestDeviceStore(t *testing.T) {
 
 	var ctx = context.Background()
 
-	t.Run("CreateZone", func(t *testing.T) {
+	t.Run("Create", func(t *testing.T) {
 		defer os.RemoveAll(t.Name())
 		os.RemoveAll(t.Name())
 		store.Clear()

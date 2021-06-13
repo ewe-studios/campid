@@ -15,7 +15,7 @@ func TestCSRFStore(t *testing.T) {
 	var store = nmap.NewExprByteStore(100)
 	var csrfStore = NewCSRFStore(store, 1*time.Minute)
 
-	t.Run("GetOrCreate", func(t *testing.T) {
+	t.Run("Create", func(t *testing.T) {
 		store.Clear()
 
 		var token, err = csrfStore.GetOrCreate(ctx, sessionId)
@@ -31,7 +31,7 @@ func TestCSRFStore(t *testing.T) {
 	t.Run("GetOrCreateWithDur", func(t *testing.T) {
 		store.Clear()
 
-		var token, err = csrfStore.GetOrCreateWithDur(ctx, sessionId, time.Minute * 2)
+		var token, err = csrfStore.GetOrCreateWithDur(ctx, sessionId, time.Minute*2)
 		require.NoError(t, err)
 		require.NotEmpty(t, token)
 
