@@ -647,6 +647,10 @@ type UserService struct {
 }
 
 func (cs *UserService) RegisterBus(bus *sabuhp.BusRelay, serviceGroup string) {
+	bus.Group(GetUserByEmailTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetUserByEmail))
+	bus.Group(GetUserByPhoneTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetUserByPhone))
+	bus.Group(GetAllUsersTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetAll))
+	bus.Group(GetUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.GetUser))
 	bus.Group(CreateUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.CreateUser))
 	bus.Group(UpdateUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.UpdateUser))
 	bus.Group(DeleteUserTopic, serviceGroup).Listen(sabuhp.TransportResponseFunc(cs.RemoveUserById))
