@@ -24,6 +24,10 @@ type SMSTemplateImpl struct {
 	Website string
 }
 
+func NewSMSTemplateImpl(title string, website string) *SMSTemplateImpl {
+	return &SMSTemplateImpl{Title: title, Website: website}
+}
+
 func (c SMSTemplateImpl) Format(code string) (string, error) {
 	return fmt.Sprintf(`(%s) Welcome to %s, we are happy you've joined us, Please supply this verification Code: %s`, c.Website, c.Title, code), nil
 }
@@ -32,6 +36,14 @@ type EmailTemplateImpl struct {
 	Title   string
 	Company string
 	Website string
+}
+
+func NewEmailTemplateImpl(title string, company string, website string) *EmailTemplateImpl {
+	return &EmailTemplateImpl{
+		Title:   title,
+		Company: company,
+		Website: website,
+	}
 }
 
 func (c EmailTemplateImpl) Format(code string) (string, error) {
@@ -57,6 +69,15 @@ type AuthCodes struct {
 	Email MailCode
 	TTL   time.Duration
 	Store nstorage.ExpirableStore
+}
+
+func NewAuthCodes(sms TelCode, email MailCode, ttl time.Duration, store nstorage.ExpirableStore) *AuthCodes {
+	return &AuthCodes{
+		SMS:   sms,
+		Email: email,
+		TTL:   ttl,
+		Store: store,
+	}
 }
 
 func (ac *AuthCodes) VerifyCode(ctx context.Context, u *User, returnedCode string) error {

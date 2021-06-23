@@ -13,9 +13,17 @@ import (
 var _ MailCode = (*SMTPMailCode)(nil)
 
 type SMTPMailCode struct {
-	Sender   EmailCode
+	Sender   SMTPSender
 	FromAddr string
 	Template CodeTemplate
+}
+
+func NewSMTPMailCode(sender SMTPSender, fromAddr string, template CodeTemplate) *SMTPMailCode {
+	return &SMTPMailCode{
+		Sender:   sender,
+		FromAddr: fromAddr,
+		Template: template,
+	}
 }
 
 func (es *SMTPMailCode) SendToEmail(ctx context.Context, toAddr string, code string) error {
@@ -32,7 +40,7 @@ func (es *SMTPMailCode) SendToEmail(ctx context.Context, toAddr string, code str
 	return es.Sender.Deliver(ctx, es.FromAddr, []byte(createMessage), toAddr)
 }
 
-type EmailCode struct {
+type SMTPSender struct {
 	Port     int
 	User     string
 	Password string
@@ -47,7 +55,7 @@ type EmailCode struct {
 // number: the sets of numbers with carrier  to send desired message (e.g 51620726@sms.vodafone.net.
 // message: the simple text message to be sent.
 //
-func (es *EmailCode) Deliver(ctx context.Context, fromAddr string, message []byte, toAddrs ...string) error {
+func (es *SMTPSender) Deliver(ctx context.Context, fromAddr string, message []byte, toAddrs ...string) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {
 		defer span.Finish()

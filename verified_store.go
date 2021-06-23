@@ -23,6 +23,14 @@ type VerifiedShop struct {
 	Store nstorage.ExpirableStore
 }
 
+func NewVerifiedShop(sms TelCode, email MailCode, store nstorage.ExpirableStore) *VerifiedShop {
+	return &VerifiedShop{
+		Email: email,
+		SMS:   sms,
+		Store: store,
+	}
+}
+
 func (ac *VerifiedShop) IsCompleted(ctx context.Context, u *User, d *Device) (bool, error) {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {

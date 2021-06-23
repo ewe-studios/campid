@@ -23,6 +23,15 @@ type DeviceAuthCodes struct {
 	Store nstorage.ExpirableStore
 }
 
+func NewDeviceAuthCodes(sms TelCode, email MailCode, ttl time.Duration, store nstorage.ExpirableStore) *DeviceAuthCodes {
+	return &DeviceAuthCodes{
+		SMS:   sms,
+		Email: email,
+		TTL:   ttl,
+		Store: store,
+	}
+}
+
 func (ac *DeviceAuthCodes) VerifyCode(ctx context.Context, u *User, d *Device, returnedCode string) error {
 	var span openTracing.Span
 	if ctx, span = ntrace.NewMethodSpanFromContext(ctx); span != nil {

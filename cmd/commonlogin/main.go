@@ -30,12 +30,17 @@ import (
 )
 
 const (
-	NAMESPACE = "CAMPID"
-	AddrENV   = "ADDR"
-	ENV       = "ENV"
-	GRP       = "GROUP"
-	OWNER     = "OWNER"
-	JwtEncKey = "JWT_ENC_KEY"
+	NAMESPACE         = "CAMPID"
+	AddrENV           = "ADDR"
+	ENV               = "ENV"
+	GRP               = "GROUP"
+	OWNER             = "OWNER"
+	JwtEncKey         = "JWT_ENC_KEY"
+	TwilioAccountSide = "TWILIO_ACCOUNT_SID"
+	TwilioAuthToken   = "TWILIO_AUTH_TOKEN"
+	TwilioPhoneNumber = "TWILIO_PHONE_NUMBER"
+	SendGridAuth      = "SENDGRID_AUTH"
+	SenderEmail       = "SenderEmail"
 )
 
 func main() {
@@ -51,11 +56,55 @@ func main() {
 		log.Fatalf("Failed to find environment variable: %q\n", envs.KeyFor(JwtEncKey))
 	}
 
-	var serviceEnv, _ = envs.GetString(ENV)
-	var serviceOwner, _ = envs.GetString(OWNER)
-	var jwtPassword, _ = envs.GetString(JwtEncKey)
-	var serviceAddr, _ = envs.GetString(AddrENV)
-	var serviceGroup, _ = envs.GetString(GRP)
+	var serviceOwner, hasServiceOwner = envs.GetString(OWNER)
+	if !hasServiceOwner {
+		log.Fatalf("%q is required", envs.KeyFor(OWNER))
+	}
+
+	var serviceEnv, hasServiceEnv = envs.GetString(ENV)
+	if !hasServiceEnv {
+		log.Fatalf("%q is required", envs.KeyFor(ENV))
+	}
+
+	var jwtPassword, hasJwtPassword = envs.GetString(JwtEncKey)
+	if !hasJwtPassword {
+		log.Fatalf("%q is required", envs.KeyFor(JwtEncKey))
+	}
+
+	var serviceAddr, hasServiceAddr = envs.GetString(AddrENV)
+	if !hasServiceAddr {
+		log.Fatalf("%q is required", envs.KeyFor(AddrENV))
+	}
+
+	var serviceGroup, hasServiceGroup = envs.GetString(GRP)
+	if !hasServiceGroup {
+		log.Fatalf("%q is required", envs.KeyFor(GRP))
+	}
+
+	var senderEmail, hasSenderEmail = envs.GetString(SenderEmail)
+	if !hasSenderEmail {
+		log.Fatalf("%q is required", envs.KeyFor(SenderEmail))
+	}
+
+	var sendGridAuth, hasSendGridAuth = envs.GetString(SendGridAuth)
+	if !hasSendGridAuth {
+		log.Fatalf("%q is required", envs.KeyFor(SendGridAuth))
+	}
+
+	var twilioEmailAuth, hasTwilioEmailAuth = envs.GetString(TwilioAuthToken)
+	if !hasTwilioEmailAuth {
+		log.Fatalf("%q is required", envs.KeyFor(TwilioAuthToken))
+	}
+
+	var twilioAccountSide, hasTwilioAccountSid = envs.GetString(TwilioAccountSide)
+	if !hasTwilioAccountSid {
+		log.Fatalf("%q is required", envs.KeyFor(TwilioAccountSide))
+	}
+
+	var twilioPhoneNumber, hasTwilioPhoneNumber = envs.GetString(TwilioPhoneNumber)
+	if !hasTwilioPhoneNumber {
+		log.Fatalf("%q is required", envs.KeyFor(TwilioPhoneNumber))
+	}
 
 	var topicMaker = sabuhp.CreateTopicPartial(serviceEnv, serviceOwner)
 
@@ -122,22 +171,42 @@ func main() {
 		MapCodec:               &campid.JsonMapCodec{},
 		Store:                  redisStore,
 	})
-
 	var zoneStore = campid.NewZoneStore(&campid.JsonZoneCodec{Codec: codec}, redisStore)
 
-	var auth commonLogin.Auth
-	auth.Topics = topicMaker
-	auth.Codec = &codec
+	var phoneValidator = new(campid.PhoneValidatorImpl)
+	var emailValidator = new(campid.EmailValidatorImpl)
 
-	auth.PhoneValidator = &campid.PhoneValidatorImpl{}
-	auth.EmailValidator = &campid.EmailValidatorImpl{}
-	auth.Passwords = &campid.Password{
+	var passwordManager = &campid.Password{
 		Cost:      10,
 		MinLength: 10,
 		MaxLength: 70,
 	}
-	auth.Users = campid.NewUserStore(redisStore, userCodec, indexer, auth.Passwords, auth.EmailValidator, auth.PhoneValidator)
-	auth.Zones = campid.NewZoneManager(zoneStore, jwtStore, deviceStore)
+
+	var smsTemplate = campid.NewSMSTemplateImpl("CampId Auth Code", "www.campid.io")
+	var twilioPhoneCode = campid.NewTwilioTel(logger, smsTemplate, twilioAccountSide, twilioEmailAuth, twilioPhoneNumber)
+
+	var emailTemplate = campid.NewEmailTemplateImpl("CampId Auth Code", "CampId Auth", "www.campid.io")
+	var sendGridEmailCode = campid.NewTwilioEmailCode(logger, emailTemplate, sendGridAuth, senderEmail, "Campid Auth")
+
+	var userStore = campid.NewUserStore(redisStore, userCodec, indexer, passwordManager, emailValidator, phoneValidator)
+	var zoneManager = campid.NewZoneManager(zoneStore, jwtStore, deviceStore)
+	var registrationCodes = campid.NewAuthCodes(twilioPhoneCode, sendGridEmailCode, 5*time.Minute, redisStore)
+
+	var loginCodes = campid.NewDeviceAuthCodes(twilioPhoneCode, sendGridEmailCode, 5*time.Minute, redisStore)
+
+	var auth commonLogin.Auth
+	auth.Codec = &codec
+
+	auth.Users = userStore
+	auth.Topics = topicMaker
+	auth.Zones = zoneManager
+
+	auth.Passwords = passwordManager
+	auth.PhoneValidator = phoneValidator
+	auth.EmailValidator = emailValidator
+
+	auth.LoginCodes = loginCodes
+	auth.RegistrationCodes = registrationCodes
 
 	var workers = actions.NewWorkerTemplateRegistry()
 	var cs = serviceServer.New(
